@@ -1,0 +1,76 @@
+ukf_local:
+  ros__parameters:
+    frequency: 10.0
+    two_d_mode: false
+    publish_tf: false
+    
+    alpha: 0.001 
+    kappa: 0.0 
+    beta: 2.0
+
+    map_frame: "Beckholmen"
+    odom_frame: "ekf_odom"
+    base_link_frame: "saabmarine/base_link"
+    world_frame: "ekf_odom"    
+
+    # IMU (Angular Velocity & Linear Accel)
+    imu0: "/mavros/imu/data"
+    imu0_config: [false, false, false,
+                  true, true, false,
+                  false, false, false,
+                  false,  false,  true,   # Roll, Pitch, Yaw velocities
+                  false,  false,  false]   # X, Y, Z accelerations
+    imu0_differential: false
+    imu0_relative: true
+    imu0_remove_gravitational_acceleration: true
+
+
+    # DVL (Linear Velocity)
+    twist0: "/dvl"
+    twist0_config: [false, false, false,
+                    false, false, false,
+                    true,  true,  false,   # X, Y, Z velocities
+                    false, false, false,
+                    false, false, false]
+
+
+ukf_global:
+  ros__parameters:
+    frequency: 10.0
+    two_d_mode: false
+    publish_tf: false
+
+    alpha: 0.001 
+    kappa: 0.0 
+    beta: 2.0
+
+    map_frame: "Beckholmen"
+    odom_frame: "ekf_odom"
+    base_link_frame: "saabmarine/base_link"
+    world_frame: "Beckholmen"  
+
+    # SAME IMU AS LOCAL
+    imu0: "/mavros/imu/data"
+    imu0_config: [false, false, false,
+                  true, true, false,
+                  false, false, false,
+                  false,  false,  true,
+                  false,  false,  false]
+    imu0_differential: false
+    imu0_relative: true
+    imu0_remove_gravitational_acceleration: true
+
+    twist0: "/dvl"
+    twist0_config: [false, false, false,
+                    false, false, false,
+                    true,  true,  false,
+                    false, false, false,
+                    false, false, false]
+
+    # PLUS THE ABSOLUTE DEPTH
+    pose0: "/depth_odom"
+    pose0_config: [false, false, true,    
+                   false, false, false,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]

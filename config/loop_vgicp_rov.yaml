@@ -1,0 +1,74 @@
+odom_vgicp:
+  ros__parameters:
+    is_ned: false
+    ekf_z: true
+    loop_ekf_z: true
+    ekf_max_age: 0.5
+
+    topics:
+      odom_pub: "vgicp_odom"
+      pc_sub: "/sonar/point_cloud_intensity"
+      deadreckoining_sub: "/odometry/filtered"
+      map_pub: "vgicp_global_map"
+   
+    tuning:
+      map_res: 0.2    
+      vgicp_threads: 4   
+      vgicp_epsilon: 1e-4
+      vgicp_max_dist: 3.0  
+      vgicp_max_iter: 100    
+      vgicp_resolution: 0.3
+      max_lost_frames: 40
+
+    radius_outlier_removal:
+      filter_radius_outliers: true
+      radius_search: 0.2
+      min_neighbors_in_radius: 30
+
+    outlier_removal:
+      filter_outliers: true
+      num_neighbors: 30
+      stddev_mul_thresh: 0.7
+      # stddev_mul_thresh: 1.0
+
+    intensity_filter:
+      filter_intensity: false
+      min_intensity: 0.005
+
+    
+
+    tf:
+      sonar2base_x: -0.111
+      sonar2base_y: 0.000
+      sonar2base_z: 0.249
+      sonar2base_roll: 0.0
+      sonar2base_pitch: 34.0  # degrees (- down / + up)
+      sonar2base_yaw: 0.0
+
+    keyframe:
+      submap_size:   30      
+      dist_thresh:   0.8
+      angle_thresh:  8.0    # degrees 
+
+
+    loop_closure:
+      search_radius: 15.0
+      fitness_score: 0.4
+      history_gap: 20
+      submap_size: 5
+      vgicp_epsilon: 1e-4
+      vgicp_max_dist: 2.5
+      vgicp_max_iter: 100  
+      vgicp_resolution: 0.3
+
+    gtsam:
+      odom_noise_x: 0.4
+      odom_noise_y: 0.4
+      odom_noise_z: 0.001
+      odom_noise_roll: 0.001
+      odom_noise_pitch: 0.001
+      odom_noise_yaw: 0.2
+
+    frames:
+      odom_frame: "Beckholmen"
+      base_frame: "saabmarine/base_link"

@@ -1,0 +1,31 @@
+fastvgicp_odom:
+  ros__parameters:
+    topics:
+      odom_pub: "vgicp_odom"
+      pc_sub: "/sonar/point_cloud_noisy"
+      ekf_sub: "/odometry/filtered"
+      map_pub: "vgicp_global_map"
+    tuning:
+      map_res: 0.2   
+      vgicp_threads: 4      
+      vgicp_epsilon: 1e-4
+      vgicp_max_dist: 2.0  
+      vgicp_max_iter: 50  
+      vgicp_resolution: 0.5
+    
+    tf:
+      sonar2base_x: -0.545
+      sonar2base_y: 0.000
+      sonar2base_z: -0.404
+      sonar2base_roll: 0.0
+      sonar2base_pitch: -30.0  # degrees (- down / + up)
+      sonar2base_yaw: 0.0
+
+    keyframe:
+      submap_size:   25      
+      dist_thresh:   0.5     
+      angle_thresh:  8.0    # degrees 
+
+    frames:
+      odom_frame: "odom"
+      base_frame: "sam_auv_v1/base_link"
