@@ -3,7 +3,7 @@ odom_vgicp:
     is_ned: false
     ekf_z: true
     loop_ekf_z: true
-    ekf_max_age: 0.5
+    ekf_max_age: 0.1
 
     topics:
       odom_pub: "vgicp_odom"
@@ -53,21 +53,21 @@ odom_vgicp:
 
     loop_closure:
       search_radius: 15.0
-      fitness_score: 0.4
-      history_gap: 20
-      submap_size: 5
+      fitness_score: 0.5
+      history_gap: 15
+      submap_size: 8
       vgicp_epsilon: 1e-4
-      vgicp_max_dist: 2.5
+      vgicp_max_dist: 1.0
       vgicp_max_iter: 100  
       vgicp_resolution: 0.3
 
     gtsam:
-      odom_noise_x: 0.4
-      odom_noise_y: 0.4
+      odom_noise_x: 0.01
+      odom_noise_y: 0.01
       odom_noise_z: 0.001
       odom_noise_roll: 0.001
       odom_noise_pitch: 0.001
-      odom_noise_yaw: 0.2
+      odom_noise_yaw: 0.01
 
     frames:
       odom_frame: "Beckholmen"
