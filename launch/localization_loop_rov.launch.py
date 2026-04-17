@@ -23,7 +23,7 @@ def generate_launch_description():
             executable='depth_bridge',
             name='depth_bridge',
             output='screen',
-            parameters=[{'frame_id': 'Beckholmen','rel_alt_topic': '/mavros/global_position/rel_alt'}],),
+            parameters=[{'frame_id': 'map','rel_alt_topic': '/mavros/global_position/rel_alt','relative_depth':True,"ned": False}],),
 
             
         #### EKF Nodes ####
@@ -83,14 +83,21 @@ def generate_launch_description():
             parameters=[{'use_sim_time': True}]
         ),
 
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='Beckholmen_tf',
-            arguments=['0', '0', '0', '0.0', '0', '0.0', 'Beckholmen', 'ekf_odom'],
-            parameters=[{'use_sim_time': True}]
-        ),
+        # Node(
+        #     package='tf2_ros',
+        #     executable='static_transform_publisher',
+        #     name='Beckholmen_ekf',
+        #     arguments=['0', '0', '0', '0.0', '0', '0.0', 'Beckholmen', 'map'],
+        #     parameters=[{'use_sim_time': True}]
+        # ),
 
+        Node(
+            package='dead_reckoning',
+            executable='odom_tf',
+            name='map_tf',
+            output='screen',
+            parameters=[{'parent_frame': 'Beckholmen', 'child_frame': 'map', 'use_sim_time': True, 'init_x': 37.77, 'init_y': -2.6, 'init_z': -1.5, 'init_yaw': -3.10}]
+        ),
 
         # vgicp odometry
         Node(
@@ -107,9 +114,23 @@ def generate_launch_description():
                 executable='rviz2',
                 name='rviz2',
                 output='screen',
-                arguments=['-d', os.path.join(pkg_share, 'rviz', 'rov2.rviz')],
+                arguments=['-d', os.path.join(pkg_share, 'rviz', 'rov_dry_dock.rviz')],
                 parameters=[{'use_sim_time': True}]
             ),
+        
+        Node(
+            package='robot_state_publisher',
+            executable='robot_state_publisher',
+            name='dry_dock_state_publisher',
+            output='screen',
+            parameters=[{
+                'robot_description': open(
+                    os.path.join(pkg_share, 'description', 'dry_dock.urdf')
+                ).read(),
+                'frame_id': 'Beckholmen',   # publishes my_link relative to this frame
+            }]
+        ),
+
 
         ### Navsat #####
         # Node(

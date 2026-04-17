@@ -13,6 +13,6 @@
   <joint name="world_to_dock" type="fixed">
     <parent link="Beckholmen"/>
     <child link="dry_dock_mesh"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 1.35" rpy="0 0 0"/>
   </joint>
 </robot>

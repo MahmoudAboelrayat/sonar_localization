@@ -151,6 +151,7 @@ public:
             std::bind(&GicpOdomNode::ekfCallback, this, std::placeholders::_1),
             ekf_sub_opt);
 
+
         // Loop closure in a plain std::thread — same pattern as LIO-SAM
         loop_closure_thread_ = std::thread(&GicpOdomNode::loopClosureThread, this);
 
@@ -202,6 +203,14 @@ public:
         odom_noise_y_     = this->declare_parameter<double>("gtsam.odom_noise_y",     0.5);
         odom_noise_z_     = this->declare_parameter<double>("gtsam.odom_noise_z",     0.3);
 
+        lc_noise_roll_    = this->declare_parameter<double>("gtsam.lc_noise_roll",    0.01);
+        lc_noise_pitch_   = this->declare_parameter<double>("gtsam.lc_noise_pitch",   0.01);
+        lc_noise_yaw_     = this->declare_parameter<double>("gtsam.lc_noise_yaw",     0.01);
+        lc_noise_x_       = this->declare_parameter<double>("gtsam.lc_noise_x",       0.05);
+        lc_noise_y_       = this->declare_parameter<double>("gtsam.lc_noise_y",       0.05);
+        lc_noise_z_       = this->declare_parameter<double>("gtsam.lc_noise_z",       0.05);
+        lc_huber_k_       = this->declare_parameter<double>("gtsam.lc_huber_k",       1.0);
+
         initGTSAM();
 
         RCLCPP_INFO(get_logger(), "VGICP SLAM Node initialised.");
@@ -237,9 +246,10 @@ private:
         // Fixed tight LC noise + Huber robust kernel
         // Much tighter than odomNoise_ so LC corrections propagate strongly
         auto lc_base = gtsam::noiseModel::Diagonal::Sigmas(
-            (gtsam::Vector(6) << 0.01, 0.01, 0.01, 0.05, 0.05, 0.05).finished());
+            (gtsam::Vector(6) << lc_noise_roll_, lc_noise_pitch_, lc_noise_yaw_,
+                                 lc_noise_x_,    lc_noise_y_,     lc_noise_z_).finished());
         robustLoopNoise_ = gtsam::noiseModel::Robust::Create(
-            gtsam::noiseModel::mEstimator::Huber::Create(1.0), lc_base);
+            gtsam::noiseModel::mEstimator::Huber::Create(lc_huber_k_), lc_base);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -949,6 +959,11 @@ private:
 
     double odom_noise_roll_{0.1},  odom_noise_pitch_{0.1}, odom_noise_yaw_{0.3};
     double odom_noise_x_{0.5},     odom_noise_y_{0.5},     odom_noise_z_{0.3};
+
+    double lc_noise_roll_{0.01},   lc_noise_pitch_{0.01},  lc_noise_yaw_{0.01};
+    double lc_noise_x_{0.05},      lc_noise_y_{0.05},      lc_noise_z_{0.05};
+    double lc_huber_k_{1.0};
+
 
 
 };

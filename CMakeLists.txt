@@ -181,12 +181,16 @@ install(PROGRAMS ${PROJECT_NAME}/pointcloud_features.py
         DESTINATION lib/${PROJECT_NAME} 
         RENAME pointcloud_features)
 
-install(PROGRAMS ${PROJECT_NAME}/sonar_noise.py 
-        DESTINATION lib/${PROJECT_NAME} 
+install(PROGRAMS ${PROJECT_NAME}/sonar_noise.py
+        DESTINATION lib/${PROJECT_NAME}
         RENAME sonar_noise)
 
+install(PROGRAMS ${PROJECT_NAME}/odom_tf.py
+        DESTINATION lib/${PROJECT_NAME}
+        RENAME odom_tf)
+
 # Install Shared Directories
-install(DIRECTORY launch config rviz
+install(DIRECTORY launch config rviz description
   DESTINATION share/${PROJECT_NAME}
 )
 

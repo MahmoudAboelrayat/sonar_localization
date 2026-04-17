@@ -15,7 +15,7 @@ odom_vgicp:
       map_res: 0.2    
       vgicp_threads: 4   
       vgicp_epsilon: 1e-4
-      vgicp_max_dist: 3.0  
+      vgicp_max_dist: 2.5  
       vgicp_max_iter: 100    
       vgicp_resolution: 0.3
       max_lost_frames: 40
@@ -47,28 +47,28 @@ odom_vgicp:
 
     keyframe:
       submap_size:   30      
-      dist_thresh:   0.8
+      dist_thresh:   1.0
       angle_thresh:  8.0    # degrees 
 
 
     loop_closure:
       search_radius: 15.0
-      fitness_score: 0.5
-      history_gap: 15
-      submap_size: 8
+      fitness_score: 0.06
+      history_gap: 20
+      submap_size: 10
       vgicp_epsilon: 1e-4
-      vgicp_max_dist: 1.0
+      vgicp_max_dist: 3.00 #working 3.0
       vgicp_max_iter: 100  
       vgicp_resolution: 0.3
 
     gtsam:
-      odom_noise_x: 0.01
-      odom_noise_y: 0.01
+      odom_noise_x: 0.0125
+      odom_noise_y: 0.0125
       odom_noise_z: 0.001
       odom_noise_roll: 0.001
       odom_noise_pitch: 0.001
       odom_noise_yaw: 0.01
 
     frames:
-      odom_frame: "Beckholmen"
+      odom_frame: "map"
       base_frame: "saabmarine/base_link"

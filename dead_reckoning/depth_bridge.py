@@ -19,11 +19,13 @@ class DepthToOdom(Node):
         self.declare_parameter("rel_alt_topic", "/sam_auv_v1/smarc/dep")
         self.declare_parameter("output_topic", "depth_odom")
         self.declare_parameter("relative_depth", True)
+        self.declare_parameter("ned", False)
 
         global_pos_topic = self.get_parameter("global_pos_topic").value
         rel_alt_topic = self.get_parameter("rel_alt_topic").value
         output_topic = self.get_parameter("output_topic").value
         self.relative_depth = self.get_parameter("relative_depth").get_parameter_value().bool_value
+        self.ned = self.get_parameter("ned").get_parameter_value().bool_value
         
         self.declare_parameter("sim", True)
         self.sim = self.get_parameter("sim").get_parameter_value().bool_value
@@ -61,7 +63,10 @@ class DepthToOdom(Node):
         self.stamp = msg.header.stamp
 
     def rel_alt_callback(self, msg: Float64):
-        rel_alt = msg.data  # in meters
+        if self.ned:
+            rel_alt = -msg.data  # Convert NED to ENU
+        else:
+            rel_alt = msg.data  # in meters
 
         if self.depth_offset is None and self.relative_depth:
             self.depth_offset = rel_alt
