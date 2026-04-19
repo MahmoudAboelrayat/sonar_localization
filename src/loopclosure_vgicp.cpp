@@ -66,6 +66,7 @@ public:
         int    vgicp_max_iter = this->declare_parameter<int>   ("tuning.vgicp_max_iter",   100);
         double vgicp_res      = this->declare_parameter<double>("tuning.vgicp_resolution", 0.25);
         int max_lost_frames = this->declare_parameter<int>("tuning.max_lost_frames", 40);
+        min_ekf_msgs_       = this->declare_parameter<int>("tuning.min_ekf_msgs",    20);
 
 
         double lc_vgicp_epsilon  = this->declare_parameter<double>("loop_closure.vgicp_epsilon",    1e-4);
@@ -610,6 +611,7 @@ private:
         latest_ekf_pose_ = pose;
         latest_ekf_stamp_ = msg->header.stamp;
         has_ekf_ = true;
+        ekf_msg_count_++;
     }
 
     // ── Point cloud callback ───────────────────────────────────────────────────
@@ -618,6 +620,15 @@ private:
         if (!has_ekf_) {
             RCLCPP_WARN_ONCE(get_logger(), "Waiting for first EKF message...");
             return;
+        }
+        {
+            std::lock_guard<std::mutex> lock(ekf_mutex_);
+            if (ekf_msg_count_ < min_ekf_msgs_) {
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                    "Waiting for EKF to converge (%d / %d messages)",
+                    ekf_msg_count_.load(), min_ekf_msgs_);
+                return;
+            }
         }
 
         {
@@ -920,6 +931,8 @@ private:
     Eigen::Matrix4f      latest_ekf_pose_;
     rclcpp::Time         latest_ekf_stamp_{0, 0, RCL_ROS_TIME};
     bool                 has_ekf_{false};
+    std::atomic<int>     ekf_msg_count_{0};
+    int                  min_ekf_msgs_{20};
     double               ekf_max_age_{0.5};
 
     Eigen::Matrix4f prev_ekf_pose_;  // only accessed from pointCloudCallback
