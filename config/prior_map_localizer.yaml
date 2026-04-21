@@ -1,0 +1,71 @@
+prior_map_localizer:
+  ros__parameters:
+
+    # Path to your pre-built ground truth map (.pcd file)
+    prior_map_path: "/home/mahmoud/thesis/docs/full_map.pcd"
+
+    prior_map_resolution: 0.2
+
+    # Initial map→odom transform (robot's known starting position in the map)
+    init_pose:
+      x:   59.3212
+      y:   107.60
+      z:   0.0
+      yaw: 0.764926 # radians
+
+    frames:
+      odom_frame: "ekf_odom"
+      prior_map_frame: "unity_origin"
+      base_frame: "BlueROV2_Heavy/base_link"
+      sonar_frame: "BlueROV2_Heavy/3d_sonar_link"
+
+    # Sonar → base_link extrinsics (same as your VGICP node)
+    tf:
+        sonar2base_x: 0.007
+        sonar2base_y: 0.000
+        sonar2base_z: -0.091
+        sonar2base_roll: 0.0
+        sonar2base_pitch: -30.0  # degrees (- down / + up)
+        sonar2base_yaw: 0.0
+
+    # ── Local VGICP (scan → local submap) ──────────────────
+    # Runs every frame — keep reasonably fast
+    local_vgicp:
+      max_dist:   4.0     # correspondence distance [m]
+      epsilon:    1.0e-4  # convergence criterion
+      max_iter:   150
+      resolution: 0.5    # voxel resolution [m]
+
+    # ── Global VGICP (local submap → prior map) ────────────
+    # Runs every N keyframes — can be slower/more accurate
+    global_vgicp:
+      max_dist:        2.0   # wider search for global matching
+      epsilon:         1.0e-6
+      max_iter:        200
+      resolution:      0.5    # finer than local for accuracy
+      score_thresh:    0.15   # reject matches worse than this
+      match_every_n_kf: 10    # match against prior every N keyframes
+
+    # ── Keyframe / submap ──────────────────────────────────
+    keyframe:
+      dist_thresh:  0.5    # add keyframe every 30cm
+      angle_thresh: 8.0    # or every 4 degrees
+      submap_size:  25     # use last 15 keyframes as local map
+
+    # ── Outlier removal ────────────────────────────────────
+    outlier_removal:
+      use_sor:         false
+      num_neighbors:   20
+      stddev_thresh:   1.0
+      use_radius:      false
+      radius_search:   0.5
+      min_neighbors:   5
+
+    # ── Intensity filter ───────────────────────────────────
+    intensity_filter:
+      enabled:   false
+      min_value: 0.005
+
+    topics:
+      point_cloud_topic: "/sonar/point_cloud_local"
+      odom_topic: "/odometry/filtered"

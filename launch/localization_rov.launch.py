@@ -68,6 +68,13 @@ def generate_launch_description():
             arguments=['0', '0', '0', '0.0', '0', '3.14159265359', 'world', 'Beckholmen'],
             parameters=[{'use_sim_time': True}]),
 
+            Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='Beckholmen_tf',
+            arguments=['0', '0', '0', '0.0', '0', '0.0', 'Beckholmen','icp_map'],
+            parameters=[{'use_sim_time': True}]),
+
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',

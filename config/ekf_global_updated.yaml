@@ -1,0 +1,54 @@
+# robot_localization EKF — updated to accept prior map absolute pose
+# Add pose1 to your existing ekf_global config
+
+ekf_global:
+  ros__parameters:
+    frequency: 10.0
+    two_d_mode: true
+    publish_tf: false
+
+    map_frame: "unity_origin"
+    odom_frame: "ekf_odom"
+    base_link_frame: "BlueROV2_Heavy/base_link"
+    world_frame: "ekf_odom" 
+
+    # ── Existing sensors (keep as is) ──────────────────────
+
+    imu0: "/imu/data"
+    imu0_config: [false, false, false,
+                  true,  true,  false,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]
+    imu0_differential: false
+    imu0_relative:     false
+    imu0_remove_gravitational_acceleration: true
+
+    twist0: "/dvl"
+    twist0_config: [false, false, false,
+                    false, false, false,
+                    true,  true,  false,
+                    false, false, false,
+                    false, false, false]
+
+    # pose0: "/depth_odom"
+    # pose0_config: [false, false, true,    # Z only
+    #                false, false, false,
+    #                false, false, false,
+    #                false, false, false,
+    #                false, false, false]
+    # pose0_differential: false
+    # pose0_relative:     false
+
+    # ── NEW: absolute pose from prior map localizer ────────
+    # Published by prior_map_localizer node on /prior_map_pose
+    # Contains full 6DOF absolute pose in the map frame
+    # pose1: "/prior_map_pose"
+    # pose1_config: [true,  true,  false,    # x, y, z  — full position
+    #                false, false, true,    # yaw only — sonar gives good yaw
+    #                false, false, false,
+    #                false, false, false,
+    #                false, false, false]
+    # pose1_differential: false   # absolute pose, not relative
+    # pose1_relative:     false
+    # pose1_rejection_threshold: 2.0  # reject outliers > 2 sigma

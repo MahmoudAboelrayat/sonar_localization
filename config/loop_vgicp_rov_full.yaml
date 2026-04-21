@@ -19,6 +19,7 @@ odom_vgicp:
       vgicp_max_iter: 100    
       vgicp_resolution: 0.3
       max_lost_frames: 40
+      min_ekf_msgs: 70
 
     radius_outlier_removal:
       filter_radius_outliers: true
@@ -57,7 +58,7 @@ odom_vgicp:
       history_gap: 20
       submap_size: 10
       vgicp_epsilon: 1e-4
-      vgicp_max_dist: 3.00 #working 3.0
+      vgicp_max_dist: 2.50 #working 3.0
       vgicp_max_iter: 100  
       vgicp_resolution: 0.3
 

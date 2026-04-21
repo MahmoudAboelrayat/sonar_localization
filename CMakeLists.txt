@@ -15,6 +15,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(pcl_ros REQUIRED)
+find_package(tf2_ros REQUIRED)
 
 # External Libraries
 find_package(fast_gicp REQUIRED)
@@ -39,6 +40,21 @@ target_include_directories(loopclosure_vgicp PUBLIC
 target_link_libraries(loopclosure_vgicp 
   ${PCL_LIBRARIES} 
   gtsam
+)
+
+# Node: prior_map_localizer
+add_executable(prior_map_localizer src/prior_map_localizer.cpp)
+ament_target_dependencies(prior_map_localizer
+  rclcpp sensor_msgs nav_msgs geometry_msgs
+  visualization_msgs pcl_conversions pcl_ros
+  fast_gicp tf2_ros
+)
+target_include_directories(prior_map_localizer PUBLIC
+  ${PCL_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+)
+target_link_libraries(prior_map_localizer
+  ${PCL_LIBRARIES}
 )
 
 # Node: odom_mapping
@@ -125,8 +141,9 @@ target_link_libraries(mapping
 # --- 4. Install Directives ---
 
 # Install C++ Executables
-install(TARGETS 
+install(TARGETS
   loopclosure_vgicp
+  prior_map_localizer
   odom_mapping
   gicp_odom
   fastgicp_odom
