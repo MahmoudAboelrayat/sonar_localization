@@ -1,17 +1,30 @@
+prior_map_publisher:
+  ros__parameters:
+    prior_map_path:       "/home/mahmoud/thesis/docs/full_map_cleaned_sim.pcd"
+    prior_map_resolution: 0.2
+    map_frame:            "unity_origin"
+    map_topic:            "prior_map"
+    publish_period:       5.0   # seconds between re-publishes (for RViz reconnects)
+
 prior_map_localizer:
   ros__parameters:
 
     # Path to your pre-built ground truth map (.pcd file)
-    prior_map_path: "/home/mahmoud/thesis/docs/full_map.pcd"
+    prior_map_path: "/home/mahmoud/thesis/docs/full_map_cleaned_sim.pcd"
 
     prior_map_resolution: 0.2
 
     # Initial map→odom transform (robot's known starting position in the map)
+    # 58.717, 106.625 -> target
+
     init_pose:
-      x:   59.3212
-      y:   107.60
+      # x:   71.4717
+      # y:   104.759
+      x: 65.0658
+      y: 104.968
       z:   0.0
-      yaw: 0.764926 # radians
+      # yaw: 0.304926 # radians
+      yaw: 0.73
 
     frames:
       odom_frame: "ekf_odom"
@@ -19,6 +32,9 @@ prior_map_localizer:
       base_frame: "BlueROV2_Heavy/base_link"
       sonar_frame: "BlueROV2_Heavy/3d_sonar_link"
 
+    topics:
+      point_cloud_topic: "/sonar/point_cloud_noisy"
+      odom_topic: "/odometry/filtered"
     # Sonar → base_link extrinsics (same as your VGICP node)
     tf:
         sonar2base_x: 0.007
@@ -30,42 +46,83 @@ prior_map_localizer:
 
     # ── Local VGICP (scan → local submap) ──────────────────
     # Runs every frame — keep reasonably fast
+    #small error
+    # local_vgicp:
+    #   max_dist:   1.5   # correspondence distance [m]
+    #   epsilon:    1.0e-4  # convergence criterion
+    #   max_iter:   150
+    #   resolution: 0.5  # voxel resolution [m]
+    #tiny_error
     local_vgicp:
-      max_dist:   4.0     # correspondence distance [m]
+      max_dist:   1.5   # correspondence distance [m]
       epsilon:    1.0e-4  # convergence criterion
       max_iter:   150
-      resolution: 0.5    # voxel resolution [m]
+      resolution: 0.3  # voxel resolution [m]
 
     # ── Global VGICP (local submap → prior map) ────────────
     # Runs every N keyframes — can be slower/more accurate
     global_vgicp:
-      max_dist:        2.0   # wider search for global matching
-      epsilon:         1.0e-6
+      max_dist:        2.0  # wider search for global matching
+      epsilon:         1.0e-4
       max_iter:        200
-      resolution:      0.5    # finer than local for accuracy
-      score_thresh:    0.15   # reject matches worse than this
-      match_every_n_kf: 10    # match against prior every N keyframes
+      resolution:      0.3    # finer than local for accuracy
+      score_thresh:    2.0 # reject matches worse than this
+      match_every_n_kf: 20    # match against prior every N keyframes
 
     # ── Keyframe / submap ──────────────────────────────────
     keyframe:
-      dist_thresh:  0.5    # add keyframe every 30cm
-      angle_thresh: 8.0    # or every 4 degrees
-      submap_size:  25     # use last 15 keyframes as local map
+      dist_thresh:    0.8   # add keyframe every 50cm (1.0)
+      angle_thresh:   5.0   # or every 5 degrees (8.0)
+      submap_size:    45    # use last 20 keyframes as local map (40)
+      submap_voxel_res: 0.3 # voxel size for submap downsampling (separate from VGICP resolution)
 
     # ── Outlier removal ────────────────────────────────────
     outlier_removal:
-      use_sor:         false
+      use_sor:         true
       num_neighbors:   20
       stddev_thresh:   1.0
       use_radius:      false
       radius_search:   0.5
-      min_neighbors:   5
+      min_neighbors:   10
 
     # ── Intensity filter ───────────────────────────────────
     intensity_filter:
       enabled:   false
       min_value: 0.005
 
-    topics:
-      point_cloud_topic: "/sonar/point_cloud_local"
-      odom_topic: "/odometry/filtered"
+    dbscan:
+      enabled:       false   # set true to remove isolated noise clusters before global VGICP
+      tolerance:     1.0     # metres — max distance between points in the same cluster
+      min_points:    10      # minimum points to form a cluster (noise rejection)
+      keep_clusters: 1       # number of largest clusters to keep
+
+    # ── Global matcher selection ───────────────────────────
+    # use_ndt: true  → PCL NDT  (better for large initial offsets)
+    # use_ndt: false → fast_gicp VGICP (default, faster)
+    global_matcher:
+      use_ndt:        true
+      ndt_resolution: 1.0  # NDT voxel cell size [m] — larger = faster, coarser
+      ndt_step_size:  1.0   # Newton step size [m]
+      ndt_max_iter:   100
+      ndt_epsilon:    0.0001  # convergence criterion
+
+    # ── GTSAM noise parameters ──────────────────────────────
+    gtsam:
+      # Odometry factor noise (local VGICP scan-to-submap)
+      # Larger = GTSAM can deviate more from odometry
+      # → allows prior map factors to correct drift
+      odom_noise_trans: 0.5   # metres
+      odom_noise_rot:   0.1   # radians
+ 
+      # Prior map factor noise (submap-to-prior VGICP)
+      # final_noise = min + fitness_score * scale
+      # Better match (lower score) → lower noise → GTSAM trusts more
+      prior_map_noise_min:   0.01   # minimum noise (perfect match)
+      prior_map_noise_scale: 3.0   # noise per unit of fitness score
+
+      # Initial pose anchor — how much GTSAM can deviate from init_pose
+      # Set large (e.g. 5.0 m / 1.0 rad) if you don't trust the initial position
+      # Set small (e.g. 0.1 m) if you know the starting pose precisely
+      init_pose_noise_trans: 15.0   # metres
+      init_pose_noise_rot:   0.75   # radians
+ 

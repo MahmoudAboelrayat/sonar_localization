@@ -10,14 +10,23 @@ def launch_setup(context, *args, **kwargs):
     pkg_share = get_package_share_directory('dead_reckoning')
     ekf_config_path = os.path.join(pkg_share, 'config', 'ekf_loop.yaml')
 
-    full_bag = LaunchConfiguration('full_bag').perform(context).lower() in ('true', '1', 'yes')
+    full_bag  = LaunchConfiguration('full_bag').perform(context).lower() in ('true', '1', 'yes')
+    gicp_backend = LaunchConfiguration('gicp').perform(context).lower()  # 'fast' or 'small'
 
     if full_bag:
-        vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_vgicp_rov_full.yaml')
         init_x, init_y, init_z, init_yaw = 52.670, -2.4, 0.0, -0.096
+        if gicp_backend == 'small':
+            vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_small_vgicp_rov.yaml')
+        else:
+            vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_vgicp_rov_full.yaml')
     else:
-        vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_vgicp_rov.yaml')
-        init_x, init_y, init_z, init_yaw = 37.77, -2.6, -1.5, -3.14159
+        init_x, init_y, init_z, init_yaw = 38.529, -2.881, -1.5, -3.031
+        if gicp_backend == 'small':
+            vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_small_vgicp_rov.yaml')
+        else:
+            vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_vgicp_rov.yaml')
+
+    executable = 'loopclosure_samll_vgicp' if gicp_backend == 'small' else 'loopclosure_vgicp'
 
     return [
 
@@ -124,7 +133,7 @@ def launch_setup(context, *args, **kwargs):
         # vgicp odometry
         Node(
             package='dead_reckoning',
-            executable='loopclosure_vgicp',
+            executable=executable,
             name='odom_vgicp',
             output='screen',
             parameters=[vgicp_config_path]
@@ -182,6 +191,8 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('full_bag', default_value='true',
                               description='true = full bag, false = cropped bag'),
+        DeclareLaunchArgument('gicp', default_value='fast',
+                              description='gicp backend: fast (fast_gicp) or small (small_gicp)'),
         OpaqueFunction(function=launch_setup),
     ])
 

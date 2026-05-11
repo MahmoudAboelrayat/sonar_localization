@@ -1,6 +1,9 @@
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 def generate_launch_description():
@@ -9,19 +12,37 @@ def generate_launch_description():
     localizer_config_path  = os.path.join(pkg_share, 'config', 'prior_map_localizer.yaml')
     rviz_config_path       = os.path.join(pkg_share, 'rviz', 'sim_prior.rviz')
 
-    # angle  = 90.0 * 3.14159265359 / 180.0
-    # init_x = 0.0
-    # init_y = 0.0
-    # init_z = -0.03
+    angle  = 90.0 * 3.14159265359 / 180.0
+    init_x = 0.0
+    init_y = 0.0
+    init_z = -0.03
     # angle = 53.081 * 3.14159265359/180.0
     # init_x = 0.125
     # init_y = -0.042
     # init_z = -0.000
-    angle = 55.43 * 3.14159265359/180.0
-    init_x = 0.763
-    init_y = 1.005
-    init_z = -0.000
+    # angle = 55.43 * 3.14159265359/180.0
+    # init_x = 0.763
+    # init_y = 1.005
+    # init_z = -0.000
+
+    # mode:=localize  →  prior_map_publisher + prior_map_localizer (default)
+    # mode:=map       →  mapping node only
+    mode = LaunchConfiguration('mode')
+    ns   = LaunchConfiguration('ns')
+
     return LaunchDescription([
+
+        DeclareLaunchArgument(
+            'mode',
+            default_value='prior',
+            description='Operating mode: "localize" (prior map) or "map" (build map)',
+        ),
+
+        DeclareLaunchArgument(
+            'ns',
+            default_value='',
+            description='Namespace for the mapping node (e.g. ns:=robot1)',
+        ),
 
         #### Topics Bridges ####
         Node(
@@ -60,14 +81,44 @@ def generate_launch_description():
             parameters=[{'use_sim_time': True}],
         ),
 
-        # Prior map localizer
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='tf_prior',
+            arguments=[str(init_x), str(init_y), '-5.0',
+                       '0', '0', '0',
+                       'BlueROV2_Heavy/odom', 'prior_map'],
+            parameters=[{'use_sim_time': True}],
+        ),
+
+        # ── Localize mode ──────────────────────────────────────
         Node(
             package='dead_reckoning',
-            executable='prior_map_localizer',
-            name='prior_map_localizer',
+            executable='prior_map_publisher',
+            name='prior_map_publisher',
             output='screen',
             parameters=[localizer_config_path, {'use_sim_time': True}],
+            condition=IfCondition(PythonExpression(["'", mode, "' == 'prior'"])),
         ),
+
+        
+        # ── Map mode ───────────────────────────────────────────
+        Node(
+            package='dead_reckoning',
+            executable='mapping',
+            name='mapping',
+            namespace=ns,
+            output='screen',
+            condition=IfCondition(PythonExpression(["'", mode, "' == 'mapping'"])),
+        ),
+
+        Node(
+                    package='dead_reckoning',
+                    executable='prior_map_localizer',
+                    name='prior_map_localizer',
+                    output='screen',
+                    parameters=[localizer_config_path, {'use_sim_time': True}]
+                ),
 
         # RViz
         Node(

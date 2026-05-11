@@ -7,7 +7,6 @@ Panels:
         - /TF1/Frames1
         - /dead reckoning1/Shape1
         - /vgicp1/Shape1
-        - /MarkerArray1
       Splitter Ratio: 0.6676470637321472
     Tree Height: 719
   - Class: rviz_common/Selection
@@ -27,12 +26,12 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: map
+    SyncSource: fullmap
 Visualization Manager:
   Class: ""
   Displays:
     - Alpha: 0.5
-      Cell Size: 1
+      Cell Size: 5
       Class: rviz_default_plugins/Grid
       Color: 160; 160; 164
       Enabled: true
@@ -46,7 +45,7 @@ Visualization Manager:
         Y: 0
         Z: 0
       Plane: XY
-      Plane Cell Count: 10
+      Plane Cell Count: 100
       Reference Frame: <Fixed Frame>
       Value: true
     - Class: rviz_default_plugins/TF
@@ -54,25 +53,113 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: false
+        Beckholmen:
+          Value: true
+        BlueROV2_Heavy/3d_sonar_link:
+          Value: false
+        BlueROV2_Heavy/base_link:
+          Value: true
+        BlueROV2_Heavy/camera_link:
+          Value: false
+        BlueROV2_Heavy/camera_tilt_link:
+          Value: false
+        BlueROV2_Heavy/dvl_link:
+          Value: false
+        BlueROV2_Heavy/map:
+          Value: false
         BlueROV2_Heavy/odom:
           Value: true
+        BlueROV2_Heavy/prop_back_left_link:
+          Value: false
+        BlueROV2_Heavy/prop_back_right_link:
+          Value: false
+        BlueROV2_Heavy/prop_front_left_link:
+          Value: false
+        BlueROV2_Heavy/prop_front_right_link:
+          Value: false
+        BlueROV2_Heavy/prop_horizontal_back_left_link:
+          Value: false
+        BlueROV2_Heavy/prop_horizontal_back_right_link:
+          Value: false
+        BlueROV2_Heavy/prop_horizontal_front_left_link:
+          Value: false
+        BlueROV2_Heavy/prop_horizontal_front_right_link:
+          Value: false
+        BlueROV2_Heavy/prop_middle_left_link:
+          Value: false
+        BlueROV2_Heavy/prop_middle_right_link:
+          Value: false
+        base_link:
+          Value: false
         ekf_odom:
           Value: true
+        gps:
+          Value: false
+        icp_map:
+          Value: false
         odom:
-          Value: true
+          Value: false
+        prior_map:
+          Value: false
+        saabmarine/base_link:
+          Value: false
+        saabmarine/dvl_frame:
+          Value: false
+        saabmarine/sonar_link:
+          Value: false
         unity_origin:
           Value: true
-      Marker Scale: 1
+        utm:
+          Value: true
+        utm_34_V:
+          Value: true
+        world:
+          Value: false
+      Marker Scale: 9
       Name: TF
       Show Arrows: true
       Show Axes: true
       Show Names: true
       Tree:
-        BlueROV2_Heavy/odom:
-          odom:
-            {}
         unity_origin:
+          BlueROV2_Heavy/map:
+            BlueROV2_Heavy/odom:
+              BlueROV2_Heavy/base_link:
+                BlueROV2_Heavy/3d_sonar_link:
+                  {}
+                BlueROV2_Heavy/camera_tilt_link:
+                  BlueROV2_Heavy/camera_link:
+                    {}
+                BlueROV2_Heavy/dvl_link:
+                  {}
+                BlueROV2_Heavy/prop_back_left_link:
+                  {}
+                BlueROV2_Heavy/prop_back_right_link:
+                  {}
+                BlueROV2_Heavy/prop_front_left_link:
+                  {}
+                BlueROV2_Heavy/prop_front_right_link:
+                  {}
+                BlueROV2_Heavy/prop_horizontal_back_left_link:
+                  {}
+                BlueROV2_Heavy/prop_horizontal_back_right_link:
+                  {}
+                BlueROV2_Heavy/prop_horizontal_front_left_link:
+                  {}
+                BlueROV2_Heavy/prop_horizontal_front_right_link:
+                  {}
+                BlueROV2_Heavy/prop_middle_left_link:
+                  {}
+                BlueROV2_Heavy/prop_middle_right_link:
+                  {}
+              odom:
+                {}
+              prior_map:
+                {}
           ekf_odom:
+            {}
+        utm_34_V:
+          utm:
             {}
       Update Interval: 0
       Value: true
@@ -172,7 +259,7 @@ Visualization Manager:
           Value: true
         Value: false
       Enabled: true
-      Keep: 1000
+      Keep: 1
       Name: vgicp
       Position Tolerance: 0.10000000149011612
       Shape:
@@ -182,8 +269,8 @@ Visualization Manager:
         Color: 0; 255; 0
         Head Length: 0.30000001192092896
         Head Radius: 0.10000000149011612
-        Shaft Length: 1
-        Shaft Radius: 0.05000000074505806
+        Shaft Length: 2
+        Shaft Radius: 0.15000000596046448
         Value: Arrow
       Topic:
         Depth: 5
@@ -208,7 +295,7 @@ Visualization Manager:
       Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 5.184804318001823e-44
+      Max Intensity: 6.305843089461677e-44
       Min Color: 0; 0; 0
       Min Intensity: 0
       Name: sonar
@@ -230,8 +317,8 @@ Visualization Manager:
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: 0.17402850091457367
-        Min Value: -12.658740997314453
+        Max Value: -2.1501708030700684
+        Min Value: -12.826067924499512
         Value: true
       Axis: Z
       Channel Name: intensity
@@ -307,6 +394,68 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /match_markers
       Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 229; 165; 10
+      Enabled: true
+      Head Diameter: 0.30000001192092896
+      Head Length: 0.20000000298023224
+      Length: 0.30000001192092896
+      Line Style: Billboards
+      Line Width: 0.20000000298023224
+      Name: Path
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Radius: 0.029999999329447746
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /optimized_path
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz_default_plugins/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: Intensity
+      Decay Time: 0
+      Enabled: false
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 1.233142648605839e-43
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: PointCloud2
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.009999999776482582
+      Style: Flat Squares
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /full_map
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: false
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -353,25 +502,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 127.63704681396484
+      Distance: 55.62733459472656
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 53.498130798339844
-        Y: 41.11787033081055
-        Z: -1.9965739250183105
+        X: 64.09286499023438
+        Y: 105.35096740722656
+        Z: -2.753067970275879
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.5697963237762451
+      Pitch: 1.4347963333129883
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 4.145941257476807
+      Yaw: 3.930941581726074
     Saved: ~
 Window Geometry:
   Displays:
