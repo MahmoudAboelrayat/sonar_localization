@@ -133,10 +133,10 @@ def launch_setup(context, *args, **kwargs):
         # vgicp odometry
         Node(
             package='sonar_localization',
-            executable=executable,
-            name='odom_vgicp',
+            executable='kiss_odom',
+            name='odom_kiss',
             output='screen',
-            parameters=[vgicp_config_path]
+            parameters=[os.path.join(pkg_share, 'config', 'kiss_odom_rov.yaml')]
         ),
         
         # rviz
@@ -145,7 +145,7 @@ def launch_setup(context, *args, **kwargs):
                 executable='rviz2',
                 name='rviz2',
                 output='screen',
-                arguments=['-d', os.path.join(pkg_share, 'rviz', 'rov_dry_dock.rviz')],
+                arguments=['-d', os.path.join(pkg_share, 'rviz', 'kiss.rviz')],
                 parameters=[{'use_sim_time': True}]
             ),
         

@@ -4,21 +4,21 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    pkg_share = get_package_share_directory('dead_reckoning')
+    pkg_share = get_package_share_directory('sonar_localization')
     ekf_config_path = os.path.join(pkg_share, 'config', 'ekf_usv.yaml')
     vgicp_path = os.path.join(pkg_share, 'config', 'vgicp_rov.yaml')
     return LaunchDescription([
 
         #### Topics Bridges ####
         Node(
-            package='dead_reckoning',
+            package='sonar_localization',
             executable='dvl_bridge',
             name='dvl_bridge',
             output='screen',
             parameters=[{'sim': False, 'frame_id':'/nucleus_node/bottom_track_packets'}],
         ),
         Node(
-            package='dead_reckoning',
+            package='sonar_localization',
             executable='imu_bridge',
             name='imu_bridge',
             output='screen',
@@ -29,7 +29,7 @@ def generate_launch_description():
 
 
         # Node(
-        #     package='dead_reckoning',
+        #     package='sonar_localization',
         #     executable='depth_bridge',
         #     name='depth_bridge',
         #     output='screen',
@@ -45,7 +45,7 @@ def generate_launch_description():
             parameters=[ekf_config_path,{'use_sim_time': True}]
         ),
     #    Node(
-    #        package='dead_reckoning',
+    #        package='sonar_localization',
     #        executable='imu_preintegration',
     #        name='imu_preintegration',
     #        output='screen',
@@ -111,7 +111,7 @@ def generate_launch_description():
 
         # vgicp odometry
         # Node(
-        #     package='dead_reckoning',
+        #     package='sonar_localization',
         #     executable='fastvgicp_odom',
         #     name='fastvgicp_odom',
         #     output='screen',
@@ -143,7 +143,7 @@ def generate_launch_description():
         #     ]
         # ),
         # Node(
-        #     package='dead_reckoning',
+        #     package='sonar_localization',
         #     executable='ekf_to_csv_logger',
         #     name='ekf_to_csv_logger',
         #     output='screen',

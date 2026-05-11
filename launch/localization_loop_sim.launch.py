@@ -4,14 +4,14 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    pkg_share = get_package_share_directory('dead_reckoning')
+    pkg_share = get_package_share_directory('sonar_localization')
     ekf_config_path = os.path.join(pkg_share, 'config', 'ekf_sim.yaml')
 
     return LaunchDescription([
 
         #### Topics Bridges ####
         Node(
-            package='dead_reckoning',
+            package='sonar_localization',
             executable='dvl_bridge',
             name='dvl_bridge',
             output='screen',
@@ -19,7 +19,7 @@ def generate_launch_description():
         ),
 
         Node(
-            package='dead_reckoning',
+            package='sonar_localization',
             executable='depth_bridge',
             name='depth_bridge',
             output='screen',
@@ -27,7 +27,7 @@ def generate_launch_description():
 
         
         Node(
-            package='dead_reckoning',
+            package='sonar_localization',
             executable='imu_bridge',
             name='imu_bridge',
             output='screen',
@@ -66,7 +66,7 @@ def generate_launch_description():
         # vgicp odometry
         
         Node(
-            package='dead_reckoning',
+            package='sonar_localization',
             executable='loopclosure_vgicp',
             name='loopclosure_vgicp',
             output='screen',
