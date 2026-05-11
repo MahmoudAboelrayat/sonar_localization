@@ -12,7 +12,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped
 from tf2_ros import StaticTransformBroadcaster
-from tf_transformations import quaternion_about_axis
+from tf_transformations import quaternion_from_euler, euler_from_quaternion
 class OdomTfNode(Node):
 
     def __init__(self):
@@ -25,7 +25,8 @@ class OdomTfNode(Node):
         self.declare_parameter('init_y', 0.0)
         self.declare_parameter('init_z', -1.5)
         self.declare_parameter('init_yaw', 0.0)
-
+        self.declare_parameter('init_roll', 0.0)
+        self.declare_parameter('init_pitch', 0.0)
         self.parent_frame = self.get_parameter('parent_frame').get_parameter_value().string_value
         self.child_frame  = self.get_parameter('child_frame').get_parameter_value().string_value
 
@@ -33,8 +34,10 @@ class OdomTfNode(Node):
         self.init_y = self.get_parameter('init_y').get_parameter_value().double_value
         self.init_z = self.get_parameter('init_z').get_parameter_value().double_value
         self.init_yaw = self.get_parameter('init_yaw').get_parameter_value().double_value
+        self.init_roll = self.get_parameter('init_roll').get_parameter_value().double_value
+        self.init_pitch = self.get_parameter('init_pitch').get_parameter_value().double_value
 
-        q = quaternion_about_axis(self.init_yaw, (0, 0, 1))
+        q = quaternion_from_euler(self.init_roll, self.init_pitch, self.init_yaw, axes='sxyz')
         self._br = StaticTransformBroadcaster(self)
 
         # Publish identity immediately so the TF tree is connected from the start
@@ -54,7 +57,9 @@ class OdomTfNode(Node):
     def _initial_pose_cb(self, msg: PoseWithCovarianceStamped):
         p = msg.pose.pose.position
         q = msg.pose.pose.orientation
-        self._publish_tf(p.x, p.y, self.init_z, q.x, q.y, q.z, q.w)
+        roll, pitch, yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
+        q_fixed = quaternion_from_euler(self.init_roll, self.init_pitch, yaw, axes='sxyz')
+        self._publish_tf(p.x, p.y, self.init_z, q_fixed[0], q_fixed[1], q_fixed[2], q_fixed[3])
         self.get_logger().info(
             f"Initial pose set: [{p.x:.3f}, {p.y:.3f}, {self.init_z:.3f}]")
 

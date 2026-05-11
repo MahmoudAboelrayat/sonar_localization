@@ -13,11 +13,12 @@ odom_vgicp:
    
     tuning:
       map_res: 0.2    
-      vgicp_threads: 8   
+      vgicp_threads: 6
       vgicp_epsilon: 1e-4
-      vgicp_max_dist: 1.5 
+      vgicp_max_dist: 2.0
       vgicp_max_iter: 100    
       vgicp_resolution: 0.3
+      vgicp_k_correspondences: 20   # neighbors for covariance estimation (small_gicp)
       max_lost_frames: 40
 
     radius_outlier_removal:
@@ -53,27 +54,22 @@ odom_vgicp:
 
     loop_closure:
       search_radius: 15.0
-      fitness_score: 0.2 #0.7
+      fitness_score: 0.1
       history_gap: 20
       submap_size: 10
       vgicp_epsilon: 1e-4
-      vgicp_max_dist: 4.0 #working 3.0
+      vgicp_max_dist: 3.00
       vgicp_max_iter: 100
       vgicp_resolution: 0.3
-      # NDT alternative (better for large drift at loop closure)
-      use_ndt:        false
-      ndt_resolution: 1.0   # voxel cell size [m]
-      ndt_step_size:  1.0
-      ndt_max_iter:   150
-      ndt_epsilon:    0.01
+      vgicp_k_correspondences: 30
 
     gtsam:
-      odom_noise_x: 0.0120
-      odom_noise_y: 0.0120
+      odom_noise_x: 0.0220
+      odom_noise_y: 0.0220
       odom_noise_z: 0.001
       odom_noise_roll: 0.001
       odom_noise_pitch: 0.001
-      odom_noise_yaw: 0.0125
+      odom_noise_yaw: 0.0225
 
     frames:
       odom_frame: "icp_map"

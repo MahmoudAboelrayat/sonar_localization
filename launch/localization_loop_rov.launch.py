@@ -2,12 +2,33 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.substitutions import LaunchConfiguration
 
-def generate_launch_description():
+
+def launch_setup(context, *args, **kwargs):
     pkg_share = get_package_share_directory('dead_reckoning')
-    ekf_config_path = os.path.join(pkg_share, 'config', 'ekf.yaml')
-    vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_vgicp_rov.yaml')
-    return LaunchDescription([
+    ekf_config_path = os.path.join(pkg_share, 'config', 'ekf_loop.yaml')
+
+    full_bag  = LaunchConfiguration('full_bag').perform(context).lower() in ('true', '1', 'yes')
+    gicp_backend = LaunchConfiguration('gicp').perform(context).lower()  # 'fast' or 'small'
+
+    if full_bag:
+        init_x, init_y, init_z, init_yaw = 52.670, -2.4, 0.0, -0.096
+        if gicp_backend == 'small':
+            vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_small_vgicp_rov.yaml')
+        else:
+            vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_vgicp_rov_full.yaml')
+    else:
+        init_x, init_y, init_z, init_yaw = 38.529, -2.881, -1.5, -3.031
+        if gicp_backend == 'small':
+            vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_small_vgicp_rov.yaml')
+        else:
+            vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_vgicp_rov.yaml')
+
+    executable = 'loopclosure_samll_vgicp' if gicp_backend == 'small' else 'loopclosure_vgicp'
+
+    return [
 
         #### Topics Bridges ####
         Node(
@@ -23,7 +44,7 @@ def generate_launch_description():
             executable='depth_bridge',
             name='depth_bridge',
             output='screen',
-            parameters=[{'frame_id': 'map','rel_alt_topic': '/mavros/global_position/rel_alt','relative_depth':True,"ned": False}],),
+            parameters=[{'frame_id': 'icp_map','rel_alt_topic': '/mavros/global_position/rel_alt','relative_depth':True,"ned": full_bag}],),
 
             
         #### EKF Nodes ####
@@ -87,22 +108,32 @@ def generate_launch_description():
         #     package='tf2_ros',
         #     executable='static_transform_publisher',
         #     name='Beckholmen_ekf',
-        #     arguments=['0', '0', '0', '0.0', '0', '0.0', 'Beckholmen', 'map'],
+        #     arguments=['0', '0', '0', '0.0', '0', '0.0', 'Beckholmen', 'icp_map'],
         #     parameters=[{'use_sim_time': True}]
         # ),
 
-        Node(
+        ############ cropped bag
+        # Node(
+        #     package='dead_reckoning',
+        #     executable='odom_tf',
+        #     name='map_tf',
+        #     output='screen',
+        #     parameters=[{'parent_frame': 'Beckholmen', 'child_frame': 'icp_map', 'use_sim_time': True, 'init_x': 37.77, 'init_y': -2.6, 'init_z': -1.5, 'init_yaw': -3.1415,'init_roll':0.0,'init_pitch':0.0}]
+        # ),
+
+        ############ full bag
+         Node(
             package='dead_reckoning',
             executable='odom_tf',
             name='map_tf',
             output='screen',
-            parameters=[{'parent_frame': 'Beckholmen', 'child_frame': 'map', 'use_sim_time': True, 'init_x': 37.77, 'init_y': -2.6, 'init_z': -1.5, 'init_yaw': -3.10}]
+            parameters=[{'parent_frame': 'Beckholmen', 'child_frame': 'icp_map', 'use_sim_time': True, 'init_x': init_x, 'init_y': init_y, 'init_z': init_z, 'init_yaw': init_yaw,'init_roll':0.0,'init_pitch':0.0}]
         ),
 
         # vgicp odometry
         Node(
             package='dead_reckoning',
-            executable='loopclosure_vgicp',
+            executable=executable,
             name='odom_vgicp',
             output='screen',
             parameters=[vgicp_config_path]
@@ -153,6 +184,16 @@ def generate_launch_description():
         #     parameters=[{'use_sim_time': True}]
         # )
 
+    ]
+
+
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument('full_bag', default_value='true',
+                              description='true = full bag, false = cropped bag'),
+        DeclareLaunchArgument('gicp', default_value='fast',
+                              description='gicp backend: fast (fast_gicp) or small (small_gicp)'),
+        OpaqueFunction(function=launch_setup),
     ])
 
 

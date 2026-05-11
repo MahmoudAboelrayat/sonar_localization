@@ -21,7 +21,7 @@ public:
     {
         // odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("vgicp_odom", 20);
         pc_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-            "/sonar/point_cloud_local", 20,
+            "sonar/point_cloud_noisy", 20,
             std::bind(&MapNode::pointCloudCallback, this, std::placeholders::_1)
         );
         // odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
@@ -30,17 +30,21 @@ public:
         // );
 
         odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-            "/BlueROV2_Heavy/odom_gt", 20,
+            "BlueROV2_Heavy/odom_gt", 20,
             std::bind(&MapNode::odomCallback, this, std::placeholders::_1)
         );
 
+
+        resolution = 0.2f;
 
 
         global_pose_ = Eigen::Matrix4f::Identity();
         latest_odom_pose_ = Eigen::Matrix4f::Identity();
         // prev_cloud_odom_pose_ = Eigen::Matrix4f::Identity();
 
-        global_map_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("odom_global_map", 1);
+        rclcpp::QoS map_qos(1);
+        // map_qos.transient_local().reliable();
+        global_map_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/prior_map", map_qos);
         global_map_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
 
         // Eigen::Vector3f translation_sb(-0.111f, 0.000f, 0.249f);
@@ -128,7 +132,7 @@ private:
             // Optional: Downsample the global map so RViz doesn't crash
             pcl::VoxelGrid<pcl::PointXYZ> vg;
             vg.setInputCloud(global_map_);
-            vg.setLeafSize(0.1f, 0.1f, 0.1f); // 10cm resolution
+            vg.setLeafSize(resolution, resolution, resolution); // 10cm resolution
             vg.filter(*global_map_);
 
             sensor_msgs::msg::PointCloud2 map_msg;
@@ -161,6 +165,7 @@ private:
 
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr global_map_pub_;
     pcl::PointCloud<pcl::PointXYZ>::Ptr global_map_;
+    float resolution;
 
 };
 

@@ -15,12 +15,14 @@ find_package(geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(pcl_ros REQUIRED)
+find_package(tf2_ros REQUIRED)
 
 # External Libraries
 find_package(fast_gicp REQUIRED)
-find_package(PCL 1.8 REQUIRED COMPONENTS common io registration filters)
+find_package(PCL 1.8 REQUIRED COMPONENTS common io registration filters segmentation)
 find_package(Eigen3 REQUIRED)
-find_package(GTSAM REQUIRED) 
+find_package(GTSAM REQUIRED)
+find_package(small_gicp REQUIRED)
 
 # --- 3. Executable Targets ---
 
@@ -38,6 +40,23 @@ target_include_directories(loopclosure_vgicp PUBLIC
 )
 target_link_libraries(loopclosure_vgicp 
   ${PCL_LIBRARIES} 
+  gtsam
+)
+
+# Node: prior_map_localizer
+add_executable(prior_map_localizer src/prior_map_localizer.cpp)
+ament_target_dependencies(prior_map_localizer
+  rclcpp sensor_msgs nav_msgs geometry_msgs
+  visualization_msgs pcl_conversions pcl_ros
+  fast_gicp tf2_ros GTSAM
+)
+target_include_directories(prior_map_localizer PUBLIC
+  ${GTSAM_INCLUDE_DIR}
+  ${PCL_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+)
+target_link_libraries(prior_map_localizer
+  ${PCL_LIBRARIES}
   gtsam
 )
 
@@ -108,6 +127,24 @@ target_link_libraries(imu_preintegration
 )
 
 
+# Node: loopclosure_samll_vgicp (small_gicp version)
+add_executable(loopclosure_samll_vgicp src/loopclosure_samll_vgicp.cpp)
+ament_target_dependencies(loopclosure_samll_vgicp
+  rclcpp sensor_msgs nav_msgs geometry_msgs
+  visualization_msgs pcl_conversions pcl_ros
+  GTSAM
+)
+target_include_directories(loopclosure_samll_vgicp PUBLIC
+  ${GTSAM_INCLUDE_DIR}
+  ${PCL_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+)
+target_link_libraries(loopclosure_samll_vgicp
+  ${PCL_LIBRARIES}
+  gtsam
+  small_gicp::small_gicp
+)
+
 # NODE: mapping
 add_executable(mapping src/mapping.cpp)
 ament_target_dependencies(mapping
@@ -122,11 +159,27 @@ target_link_libraries(mapping
 )
 
 
+# Node: prior_map_publisher
+add_executable(prior_map_publisher src/prior_map_publisher.cpp)
+ament_target_dependencies(prior_map_publisher
+  rclcpp sensor_msgs pcl_conversions pcl_ros
+)
+target_include_directories(prior_map_publisher PUBLIC
+  ${PCL_INCLUDE_DIRS}
+)
+target_link_libraries(prior_map_publisher
+  ${PCL_LIBRARIES}
+)
+
+
 # --- 4. Install Directives ---
 
 # Install C++ Executables
-install(TARGETS 
+install(TARGETS
   loopclosure_vgicp
+  loopclosure_samll_vgicp
+  prior_map_localizer
+  prior_map_publisher
   odom_mapping
   gicp_odom
   fastgicp_odom

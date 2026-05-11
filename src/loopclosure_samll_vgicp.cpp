@@ -20,8 +20,7 @@
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/radius_outlier_removal.h>
 
-#include <fast_gicp/gicp/fast_vgicp.hpp>
-#include <pcl/registration/ndt.h>
+#include <small_gicp/pcl/pcl_registration.hpp>
 #include <Eigen/Geometry>
 
 // --- GTSAM Headers ---
@@ -66,20 +65,15 @@ public:
         double vgicp_max_dist = this->declare_parameter<double>("tuning.vgicp_max_dist",   1.5);
         int    vgicp_max_iter = this->declare_parameter<int>   ("tuning.vgicp_max_iter",   100);
         double vgicp_res      = this->declare_parameter<double>("tuning.vgicp_resolution", 0.25);
-        max_lost_frames = this->declare_parameter<int>("tuning.max_lost_frames", 40);
+        int    vgicp_k_corr   = this->declare_parameter<int>   ("tuning.vgicp_k_correspondences", 20);
+        int max_lost_frames = this->declare_parameter<int>("tuning.max_lost_frames", 40);
         min_ekf_msgs_       = this->declare_parameter<int>("tuning.min_ekf_msgs",    20);
-
 
         double lc_vgicp_epsilon  = this->declare_parameter<double>("loop_closure.vgicp_epsilon",    1e-4);
         double lc_vgicp_max_dist = this->declare_parameter<double>("loop_closure.vgicp_max_dist",   1.5);
         int    lc_vgicp_max_iter = this->declare_parameter<int>   ("loop_closure.vgicp_max_iter",   100);
         double lc_vgicp_res      = this->declare_parameter<double>("loop_closure.vgicp_resolution", 0.25);
-
-        lc_use_ndt_      = this->declare_parameter<bool>  ("loop_closure.use_ndt",         false);
-        double lc_ndt_res  = this->declare_parameter<double>("loop_closure.ndt_resolution",  2.0);
-        double lc_ndt_step = this->declare_parameter<double>("loop_closure.ndt_step_size",   0.5);
-        double lc_ndt_eps  = this->declare_parameter<double>("loop_closure.ndt_epsilon",     0.01);
-        int    lc_ndt_iter = this->declare_parameter<int>  ("loop_closure.ndt_max_iter",     50);
+        int    lc_vgicp_k_corr   = this->declare_parameter<int>   ("loop_closure.vgicp_k_correspondences", 20);
 
         odom_frame_    = this->declare_parameter<std::string>("frames.odom_frame", "odom");
         base_frame_    = this->declare_parameter<std::string>("frames.base_frame", "sam_auv_v1/base_link");
@@ -172,24 +166,22 @@ public:
         map_filter_.setLeafSize(map_res, map_res, map_res);
 
         // VGICP — odometry (scan-to-local-map)
+        vgicp_.setRegistrationType("VGICP");
         vgicp_.setNumThreads(vgicp_threads);
         vgicp_.setTransformationEpsilon(vgicp_epsilon);
         vgicp_.setMaxCorrespondenceDistance(vgicp_max_dist);
         vgicp_.setMaximumIterations(vgicp_max_iter);
-        vgicp_.setResolution(vgicp_res);
+        vgicp_.setVoxelResolution(vgicp_res);
+        vgicp_.setCorrespondenceRandomness(vgicp_k_corr);
 
         // VGICP — loop closure (world-frame clouds, wider search)
+        vgicp_lc_.setRegistrationType("VGICP");
         vgicp_lc_.setNumThreads(vgicp_threads);
         vgicp_lc_.setMaxCorrespondenceDistance(lc_vgicp_max_dist);
         vgicp_lc_.setMaximumIterations(lc_vgicp_max_iter);
         vgicp_lc_.setTransformationEpsilon(lc_vgicp_epsilon);
-        vgicp_lc_.setResolution(lc_vgicp_res);
-
-        // NDT — loop closure (alternative to VGICP, better for large initial offsets)
-        ndt_lc_.setResolution(static_cast<float>(lc_ndt_res));
-        ndt_lc_.setStepSize(lc_ndt_step);
-        ndt_lc_.setTransformationEpsilon(lc_ndt_eps);
-        ndt_lc_.setMaximumIterations(lc_ndt_iter);
+        vgicp_lc_.setVoxelResolution(lc_vgicp_res);
+        vgicp_lc_.setCorrespondenceRandomness(lc_vgicp_k_corr);
 
         // setup outlier removal (optional)
         filter_outliers = this->declare_parameter<bool>("outlier_removal.filter_outliers", true);
@@ -445,41 +437,26 @@ private:
             return;
         }
 
-        // ── 3. Align — both clouds in WORLD frame, initial guess = identity ────
+        // ── 3. VGICP — both clouds in WORLD frame, initial guess = identity ───
+        vgicp_lc_.setInputSource(latest_cloud_world);
+        vgicp_lc_.setInputTarget(history_ds);
+
         pcl::PointCloud<pcl::PointXYZI> aligned;
-        bool            lc_converged = false;
-        double          score        = 0.0;
-        Eigen::Matrix4f correction   = Eigen::Matrix4f::Identity();
+        vgicp_lc_.align(aligned, Eigen::Matrix4f::Identity());
 
-        if (lc_use_ndt_) {
-            ndt_lc_.setInputTarget(history_ds);
-            ndt_lc_.setInputSource(latest_cloud_world);
-            ndt_lc_.align(aligned, Eigen::Matrix4f::Identity());
-            lc_converged = ndt_lc_.hasConverged();
-            score        = ndt_lc_.getFitnessScore();
-            correction   = ndt_lc_.getFinalTransformation();
-        } else {
-            vgicp_lc_.setInputSource(latest_cloud_world);
-            vgicp_lc_.setInputTarget(history_ds);
-            vgicp_lc_.align(aligned, Eigen::Matrix4f::Identity());
-            lc_converged = vgicp_lc_.hasConverged();
-            score        = vgicp_lc_.getFitnessScore();
-            correction   = vgicp_lc_.getFinalTransformation();
-        }
+        double score = vgicp_lc_.getFitnessScore();
 
-        const char* lc_matcher = lc_use_ndt_ ? "NDT" : "VGICP";
-        if (!lc_converged) {
-            RCLCPP_WARN(get_logger(), "Loop closure %s did not converge.", lc_matcher);
-            return;
-        }
+        // FIX: sanity check on the correction magnitude
+        // If correction is too large, VGICP found a wrong local minimum
+        Eigen::Matrix4f correction = vgicp_lc_.getFinalTransformation();
         Eigen::Vector3f t_corr     = correction.block<3,1>(0,3);
         float correction_dist      = t_corr.norm();
         float correction_angle     = Eigen::AngleAxisf(
             Eigen::Matrix3f(correction.block<3,3>(0,0))).angle() * 180.0f / M_PI;
 
         RCLCPP_INFO(get_logger(),
-            "LC %s: score=%.4f | correction t=%.2fm angle=%.1fdeg",
-            lc_matcher, score, correction_dist, correction_angle);
+            "LC VGICP: score=%.4f | correction t=%.2fm angle=%.1fdeg",
+            score, correction_dist, correction_angle);
 
         if (score > lc_fitness_score_) {
             RCLCPP_INFO(get_logger(), "Loop closure refused: score %.4f > threshold %.4f",
@@ -495,8 +472,8 @@ private:
         //     return;
         // }
 
-        RCLCPP_WARN(get_logger(), "Loop closure accepted! [%s] Score: %.4f | t=%.2fm | angle=%.1fdeg",
-                    lc_matcher, score, correction_dist, correction_angle);
+        RCLCPP_WARN(get_logger(), "Loop closure accepted! Score: %.4f | t=%.2fm | angle=%.1fdeg",
+                    score, correction_dist, correction_angle);
 
         // ── 4. Compute pose constraint — LIO-SAM style ────────────────────────
         // correctionLidarFrame * tWrong = tCorrect
@@ -754,6 +731,8 @@ private:
         if (vgicp_.hasConverged()) {
             Eigen::Matrix4f result = vgicp_.getFinalTransformation();
 
+            // FIX: sanity check — reject GICP result if too far from initial guess
+            // This prevents converging to wrong local minima from corrupting the map
             Eigen::Matrix4f diff           = initial_guess.inverse() * result;
             float correction_dist          = diff.block<3,1>(0,3).norm();
             float correction_angle         = Eigen::AngleAxisf(
@@ -764,6 +743,21 @@ private:
                 vgicp_.getFitnessScore(), correction_dist, correction_angle,
                 filtered->size(), map_snapshot->size());
 
+            // if (correction_dist  > static_cast<float>(gicp_max_correction_dist_) ||
+            //     correction_angle > static_cast<float>(gicp_max_correction_angle_)) {
+            //     // GICP converged to wrong minimum — fall back to EKF
+            //     RCLCPP_WARN(get_logger(),
+            //         "GICP sanity check failed (t=%.2fm, angle=%.1fdeg) — using EKF guess",
+            //         correction_dist, correction_angle);
+            //     ++lost_frames_;
+            //     {
+            //         std::lock_guard<std::mutex> pose_lock(pose_mutex_);
+            //         global_pose_   = initial_guess;
+            //     }
+            //     prev_ekf_pose_ = current_ekf_pose;
+            //     return;
+            // }
+
             lost_frames_ = 0;
 
             {
@@ -772,8 +766,8 @@ private:
                 global_pose_   = result;
                 current_global = result;
             }
-            double score = vgicp_.getFitnessScore();
-            publishOdometry(msg->header, score, false);
+
+            publishOdometry(msg->header);
             AddKeyFrame(current_global, filtered, current_ekf_pose(2, 3));
 
             if (map_pub_count_++ % 5 == 0) {
@@ -820,7 +814,7 @@ private:
     }
 
     // ── Odometry publisher ────────────────────────────────────────────────────
-    void publishOdometry(const std_msgs::msg::Header & header, double fitness_score = 0.1, bool is_global_match = false)
+    void publishOdometry(const std_msgs::msg::Header & header)
     {
         Eigen::Matrix4f pose;
         {
@@ -842,20 +836,6 @@ private:
         odom.pose.pose.orientation.y = q.y();
         odom.pose.pose.orientation.z = q.z();
         odom.pose.pose.orientation.w = q.w();
-        
-
-        double base  = is_global_match ? 0.01 : 0.5;
-        double cov_pos = base + fitness_score * 10.0;
-        double cov_yaw = cov_pos * 0.5;
-
-        odom.pose.covariance.fill(0.0);
-        odom.pose.covariance[0]  = cov_pos;    // x
-        odom.pose.covariance[7]  = cov_pos;    // y
-        odom.pose.covariance[14] = cov_pos;    // z
-        odom.pose.covariance[21] = 9999.0;     
-        odom.pose.covariance[28] = 9999.0;     
-        odom.pose.covariance[35] = cov_yaw;    // yaw
-
 
         odom_pub_->publish(odom);
     }
@@ -926,10 +906,9 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr lc_marker_pub_;
     std::thread                                                     loop_closure_thread_;
 
-    // ── GICP / NDT ────────────────────────────────────────────────────────────
-    fast_gicp::FastVGICP<pcl::PointXYZI, pcl::PointXYZI>        vgicp_;
-    fast_gicp::FastVGICP<pcl::PointXYZI, pcl::PointXYZI>        vgicp_lc_;
-    pcl::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI> ndt_lc_;
+    // ── GICP ──────────────────────────────────────────────────────────────────
+    small_gicp::RegistrationPCL<pcl::PointXYZI, pcl::PointXYZI> vgicp_;
+    small_gicp::RegistrationPCL<pcl::PointXYZI, pcl::PointXYZI> vgicp_lc_;
 
     // ── Map ───────────────────────────────────────────────────────────────────
     pcl::PointCloud<pcl::PointXYZI>::Ptr          local_map_;
@@ -980,7 +959,6 @@ private:
 
     double lc_search_radius_{10.0}, lc_fitness_score_{0.3};
     int    lc_history_gap_{10}, lc_submap_size_{7};
-    bool   lc_use_ndt_{false};
 
     // GICP sanity check thresholds
     double gicp_max_correction_dist_{1.0};   // meters

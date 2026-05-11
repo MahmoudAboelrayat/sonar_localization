@@ -2,7 +2,7 @@ fastvgicp_odom:
   ros__parameters:
     topics:
       odom_pub: "vgicp_odom"
-      pc_sub: "/sonar/point_cloud_local"
+      pc_sub: "/sonar/point_cloud_noisy"
       deadreckoining_sub: "/BlueROV2_Heavy/odom_gt"
       map_pub: "vgicp_global_map"
     
@@ -10,9 +10,9 @@ fastvgicp_odom:
       map_res: 0.2   
       vgicp_threads: 4      
       vgicp_epsilon: 1e-4
-      vgicp_max_dist: 2.0  
-      vgicp_max_iter: 50  
-      vgicp_resolution: 0.5
+      vgicp_max_dist: 0.5  
+      vgicp_max_iter: 150  
+      vgicp_resolution: 0.2
     
     tf:
       sonar2base_x: 0.007

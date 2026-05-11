@@ -4,7 +4,7 @@ ekf_local:
     two_d_mode: false
     publish_tf: true
 
-    map_frame: "Beckholmen"
+    map_frame: "icp_map"
     odom_frame: "ekf_odom"
     base_link_frame: "saabmarine/base_link"
     world_frame: "ekf_odom"    
@@ -38,12 +38,13 @@ ekf_global:
     frequency: 15.0
     two_d_mode: false
     publish_tf: true
+    history_length: 1.0
+    smooth_lagged_data: true
 
-
-    map_frame: "Beckholmen"
+    map_frame: "icp_map"
     odom_frame: "ekf_odom"
     base_link_frame: "saabmarine/base_link"
-    world_frame: "Beckholmen"  
+    world_frame: "icp_map"  
 
     imu0: "/mavros/imu/data"
     imu0_config: [false, false, false,
@@ -70,6 +71,16 @@ ekf_global:
                    false, false, false,
                    false, false, false,
                    false, false, false]
+
+    # odom0: "vgicp_odom"         
+    # odom0_config: [true,  true,  false,
+    #                false, false, true,
+    #                false, false, false,
+    #                false, false, false,
+    #                false, false, false]
+    # odom0_differential: false
+    # odom0_relative:     false
+    # odom0_rejection_threshold: 2.0
 
     # odom0: /vgicp_odom
     # odom0_config: [true,  true,  false,
