@@ -1,0 +1,36 @@
+# Build artifacts
+build/
+devel/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# C++ build
+*.o
+*.so
+*.a
+*.cmake
+CMakeCache.txt
+CMakeFiles/
+
+# ROS
+*.bag
+*.db3
+*.mcap
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs and data
+*.log
+*.csv
+*.png
+*.pcd
