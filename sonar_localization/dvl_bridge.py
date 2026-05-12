@@ -3,7 +3,6 @@ import rclpy
 from rclpy.node import Node
 from interfaces.msg import BottomTrack
 from geometry_msgs.msg import TwistWithCovarianceStamped
-from sbg_driver.msg import SbgGpsVel
 from smarc_msgs.msg import DVL
 import random
 

@@ -44,7 +44,7 @@ using gtsam::symbol_shorthand::X;
 
 struct Keyframe {
     Eigen::Matrix4f pose;
-    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud;
     int id;
     float ekf_z{0.0f};   // EKF depth at keyframe time — never overwritten by GTSAM
 };
@@ -168,7 +168,7 @@ public:
         latest_ekf_pose_ = Eigen::Matrix4f::Identity();
         prev_ekf_pose_   = Eigen::Matrix4f::Identity();
 
-        local_map_ = std::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
+        local_map_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
         map_filter_.setLeafSize(map_res, map_res, map_res);
 
         // VGICP — odometry (scan-to-local-map)
@@ -284,7 +284,7 @@ private:
 
     // ── Keyframe management ───────────────────────────────────────────────────
     void AddKeyFrame(const Eigen::Matrix4f & current_pose,
-                     pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,
+                     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
                      float ekf_z = 0.0f)
     {
         // Check keyframe threshold — quick check without GTSAM lock
@@ -388,8 +388,8 @@ private:
         int     closest_id = -1;
         int     generation_before_gicp;
 
-        pcl::PointCloud<pcl::PointXYZI>::Ptr latest_cloud_world (new pcl::PointCloud<pcl::PointXYZI>);
-        pcl::PointCloud<pcl::PointXYZI>::Ptr history_cloud_world(new pcl::PointCloud<pcl::PointXYZI>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr latest_cloud_world (new pcl::PointCloud<pcl::PointXYZ>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr history_cloud_world(new pcl::PointCloud<pcl::PointXYZ>);
         Eigen::Matrix4f latest_pose_world;
         Eigen::Matrix4f history_pose_world;
 
@@ -425,7 +425,7 @@ private:
             for (int j = -lc_submap_size_; j <= lc_submap_size_; ++j) {
                 int idx = closest_id + j;
                 if (idx < 0 || idx >= latest_id) continue;
-                pcl::PointCloud<pcl::PointXYZI> transformed;
+                pcl::PointCloud<pcl::PointXYZ> transformed;
                 pcl::transformPointCloud(*keyframes_[idx].cloud, transformed, keyframes_[idx].pose);
                 *history_cloud_world += transformed;
             }
@@ -434,8 +434,8 @@ private:
         RCLCPP_INFO(get_logger(), "Loop candidate: kf %d -> %d", latest_id, closest_id);
 
         // ── 2. Downsample history submap ──────────────────────────────────────
-        pcl::PointCloud<pcl::PointXYZI>::Ptr history_ds(new pcl::PointCloud<pcl::PointXYZI>);
-        pcl::VoxelGrid<pcl::PointXYZI> ds_filter;
+        pcl::PointCloud<pcl::PointXYZ>::Ptr history_ds(new pcl::PointCloud<pcl::PointXYZ>);
+        pcl::VoxelGrid<pcl::PointXYZ> ds_filter;
         ds_filter.setLeafSize(0.2f, 0.2f, 0.2f);
         ds_filter.setInputCloud(history_cloud_world);
         ds_filter.filter(*history_ds);
@@ -446,7 +446,7 @@ private:
         }
 
         // ── 3. Align — both clouds in WORLD frame, initial guess = identity ────
-        pcl::PointCloud<pcl::PointXYZI> aligned;
+        pcl::PointCloud<pcl::PointXYZ> aligned;
         bool            lc_converged = false;
         double          score        = 0.0;
         Eigen::Matrix4f correction   = Eigen::Matrix4f::Identity();
@@ -553,11 +553,11 @@ private:
         local_map_->clear();
         int start = std::max(0, static_cast<int>(keyframes_.size()) - submap_size_);
         for (int i = start; i < static_cast<int>(keyframes_.size()); ++i) {
-            pcl::PointCloud<pcl::PointXYZI> transformed;
+            pcl::PointCloud<pcl::PointXYZ> transformed;
             pcl::transformPointCloud(*keyframes_[i].cloud, transformed, keyframes_[i].pose);
             *local_map_ += transformed;
         }
-        pcl::PointCloud<pcl::PointXYZI>::Ptr ds(new pcl::PointCloud<pcl::PointXYZI>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr ds(new pcl::PointCloud<pcl::PointXYZ>);
         map_filter_.setInputCloud(local_map_);
         map_filter_.filter(*ds);
         local_map_ = ds;
@@ -566,15 +566,15 @@ private:
     // ── Full map publisher — call with kf_mutex_ already held ────────────────
     void publishFullMap()
     {
-        pcl::PointCloud<pcl::PointXYZI> full_map;
+        pcl::PointCloud<pcl::PointXYZ> full_map;
         for (auto & kf : keyframes_) {
-            pcl::PointCloud<pcl::PointXYZI> transformed;
+            pcl::PointCloud<pcl::PointXYZ> transformed;
             pcl::transformPointCloud(*kf.cloud, transformed, kf.pose);
             full_map += transformed;
         }
 
-        pcl::PointCloud<pcl::PointXYZI>::Ptr downsampled(new pcl::PointCloud<pcl::PointXYZI>);
-        pcl::VoxelGrid<pcl::PointXYZI> vg;
+        pcl::PointCloud<pcl::PointXYZ>::Ptr downsampled(new pcl::PointCloud<pcl::PointXYZ>);
+        pcl::VoxelGrid<pcl::PointXYZ> vg;
         vg.setLeafSize(0.2f, 0.2f, 0.2f);
         vg.setInputCloud(full_map.makeShared());
         vg.filter(*downsampled);
@@ -670,33 +670,34 @@ private:
         }
 
         // 1. Convert and intensity-filter
-        pcl::PointCloud<pcl::PointXYZI>::Ptr raw(new pcl::PointCloud<pcl::PointXYZI>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr raw(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::fromROSMsg(*msg, *raw);
 
-        pcl::PointCloud<pcl::PointXYZI>::Ptr intensity_filtered(new pcl::PointCloud<pcl::PointXYZI>);
-        intensity_filtered->reserve(raw->size());
-        if (filter_intensity) {
-            for (const auto & pt : *raw)
-                if (std::isfinite(pt.x) && pt.intensity > min_intensity)
-                    intensity_filtered->push_back(pt);
-        } else {
-            *intensity_filtered = *raw;
-        }
-
+        // pcl::PointCloud<pcl::PointXYZ>::Ptr intensity_filtered(new pcl::PointCloud<pcl::PointXYZ>);
+        // intensity_filtered->reserve(raw->size());
+        // if (filter_intensity) {
+        //     for (const auto & pt : *raw)
+        //         if (std::isfinite(pt.x) && pt.intensity > min_intensity)
+        //             intensity_filtered->push_back(pt);
+        // } else {
+        //     *intensity_filtered = *raw;
+        // }
         // 2. Transform into base frame
-        pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_base(new pcl::PointCloud<pcl::PointXYZI>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_base(new pcl::PointCloud<pcl::PointXYZ>);
         Eigen::Matrix4f base_transform = is_ned_ ? (ned_transform_ * base2sonar_) : base2sonar_;
-        pcl::transformPointCloud(*intensity_filtered, *cloud_base, base_transform);
+        // pcl::transformPointCloud(*intensity_filtered, *cloud_base, base_transform);
+        pcl::transformPointCloud(*raw, *cloud_base, base_transform);
+
 
         // 3. Radius outlier removal, then statistical outlier removal
-        pcl::PointCloud<pcl::PointXYZI>::Ptr ror_out(new pcl::PointCloud<pcl::PointXYZI>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr ror_out(new pcl::PointCloud<pcl::PointXYZ>);
         if (filter_radius_outliers_) {
             ror_.setInputCloud(cloud_base);
             ror_.filter(*ror_out);
         } else {
             ror_out = cloud_base;
         }
-        pcl::PointCloud<pcl::PointXYZI>::Ptr filtered(new pcl::PointCloud<pcl::PointXYZI>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr filtered(new pcl::PointCloud<pcl::PointXYZ>);
         if (filter_outliers) {
             sor_.setInputCloud(ror_out);
             sor_.filter(*filtered);
@@ -738,7 +739,7 @@ private:
         Eigen::Matrix4f initial_guess = current_global * ekf_delta;
 
         // 7. Snapshot local map
-        pcl::PointCloud<pcl::PointXYZI>::Ptr map_snapshot;
+        pcl::PointCloud<pcl::PointXYZ>::Ptr map_snapshot;
         {
             std::lock_guard<std::mutex> kf_lock(kf_mutex_);
             map_snapshot = local_map_;
@@ -748,7 +749,7 @@ private:
         vgicp_.setInputTarget(map_snapshot);
         vgicp_.setInputSource(filtered);
 
-        pcl::PointCloud<pcl::PointXYZI> aligned;
+        pcl::PointCloud<pcl::PointXYZ> aligned;
         vgicp_.align(aligned, initial_guess);
 
         if (vgicp_.hasConverged()) {
@@ -927,15 +928,15 @@ private:
     std::thread                                                     loop_closure_thread_;
 
     // ── GICP / NDT ────────────────────────────────────────────────────────────
-    fast_gicp::FastVGICP<pcl::PointXYZI, pcl::PointXYZI>        vgicp_;
-    fast_gicp::FastVGICP<pcl::PointXYZI, pcl::PointXYZI>        vgicp_lc_;
-    pcl::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI> ndt_lc_;
+    fast_gicp::FastVGICP<pcl::PointXYZ, pcl::PointXYZ>        vgicp_;
+    fast_gicp::FastVGICP<pcl::PointXYZ, pcl::PointXYZ>        vgicp_lc_;
+    pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> ndt_lc_;
 
     // ── Map ───────────────────────────────────────────────────────────────────
-    pcl::PointCloud<pcl::PointXYZI>::Ptr          local_map_;
-    pcl::VoxelGrid<pcl::PointXYZI>                map_filter_;
-    pcl::StatisticalOutlierRemoval<pcl::PointXYZI> sor_;
-    pcl::RadiusOutlierRemoval<pcl::PointXYZI> ror_;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr          local_map_;
+    pcl::VoxelGrid<pcl::PointXYZ>                map_filter_;
+    pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor_;
+    pcl::RadiusOutlierRemoval<pcl::PointXYZ> ror_;
 
     // ── GTSAM — always lock gtsam_mutex_ BEFORE kf_mutex_ ────────────────────
     std::mutex                              gtsam_mutex_;

@@ -7,7 +7,7 @@ odom_vgicp:
 
     topics:
       odom_pub: "vgicp_odom"
-      pc_sub: "/sonar/point_cloud_intensity"
+      pc_sub: "/sonar/point_cloud"
       deadreckoining_sub: "/odometry/filtered"
       map_pub: "vgicp_global_map"
    

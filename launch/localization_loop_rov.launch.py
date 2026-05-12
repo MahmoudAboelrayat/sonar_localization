@@ -4,14 +4,17 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
+from launch.conditions import IfCondition
 
 
 def launch_setup(context, *args, **kwargs):
     pkg_share = get_package_share_directory('sonar_localization')
     ekf_config_path = os.path.join(pkg_share, 'config', 'ekf_loop.yaml')
 
+    rviz_flag  = LaunchConfiguration('rviz').perform(context).lower() in ('true', '1', 'yes')
     full_bag  = LaunchConfiguration('full_bag').perform(context).lower() in ('true', '1', 'yes')
     gicp_backend = LaunchConfiguration('gicp').perform(context).lower()  # 'fast' or 'small'
+    sim_time = LaunchConfiguration('sim_time').perform(context).lower() in ('true', '1', 'yes')
 
     if full_bag:
         init_x, init_y, init_z, init_yaw = 52.670, -2.4, 0.0, -0.096
@@ -53,7 +56,7 @@ def launch_setup(context, *args, **kwargs):
             executable='ekf_node',
             name='ekf_local',
             output='screen',
-            parameters=[ekf_config_path,{'use_sim_time': True}],
+            parameters=[ekf_config_path,{'use_sim_time': sim_time}],
             remappings=[
                 ('odometry/filtered', 'odometry/ekf_local')
             ]
@@ -63,7 +66,7 @@ def launch_setup(context, *args, **kwargs):
             executable='ekf_node',
             name='ekf_global',
             output='screen',
-            parameters=[ekf_config_path,{'use_sim_time': True}]
+            parameters=[ekf_config_path,{'use_sim_time': sim_time}]
         ),
 
 
@@ -73,35 +76,35 @@ def launch_setup(context, *args, **kwargs):
             executable='static_transform_publisher',
             name='base_link_to_imu',
             arguments=['0', '0', '0','0.0', '0', '3.14159265359', 'saabmarine/base_link', 'base_link'],
-            parameters=[{'use_sim_time': True}]
+            parameters=[{'use_sim_time': sim_time}]
         ),
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_link_to_gps',
             arguments=['0', '0', '0', '3.1415', '0', '0.0', 'saabmarine/base_link', 'gps'],
-            parameters=[{'use_sim_time': True}]
+            parameters=[{'use_sim_time': sim_time}]
         ),
          Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='Beckholmen_tf',
             arguments=['0', '0', '0', '0.0', '0', '3.14159265359', 'world', 'Beckholmen'],
-            parameters=[{'use_sim_time': True}]),
+            parameters=[{'use_sim_time': sim_time}]),
 
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_link_to_sonar',
             arguments=['0.220', '0', '-0.160', '0.0', '-0.524', '0.0', 'saabmarine/base_link', 'saabmarine/sonar_link'],
-            parameters=[{'use_sim_time': True}]
+            parameters=[{'use_sim_time': sim_time}]
         ),
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_link_to_dvl',
             arguments=['-0.150', '-0.150', '0.150', '0.0', '0.0', '0.0', 'saabmarine/base_link', 'saabmarine/dvl_frame'],
-            parameters=[{'use_sim_time': True}]
+            parameters=[{'use_sim_time': sim_time}]
         ),
 
         # Node(
@@ -127,7 +130,7 @@ def launch_setup(context, *args, **kwargs):
             executable='odom_tf',
             name='map_tf',
             output='screen',
-            parameters=[{'parent_frame': 'Beckholmen', 'child_frame': 'icp_map', 'use_sim_time': True, 'init_x': init_x, 'init_y': init_y, 'init_z': init_z, 'init_yaw': init_yaw,'init_roll':0.0,'init_pitch':0.0}]
+            parameters=[{'parent_frame': 'Beckholmen', 'child_frame': 'icp_map', 'use_sim_time': sim_time, 'init_x': init_x, 'init_y': init_y, 'init_z': init_z, 'init_yaw': init_yaw,'init_roll':0.0,'init_pitch':0.0}]
         ),
 
         # vgicp odometry
@@ -140,15 +143,17 @@ def launch_setup(context, *args, **kwargs):
         ),
         
         # rviz
-            Node(
-                package='rviz2',
-                executable='rviz2',
-                name='rviz2',
-                output='screen',
-                arguments=['-d', os.path.join(pkg_share, 'rviz', 'rov_dry_dock.rviz')],
-                parameters=[{'use_sim_time': True}]
-            ),
-        
+
+        Node(
+            package='rviz2',
+            executable='rviz2',
+            name='rviz2',
+            output='screen',
+            arguments=['-d', os.path.join(pkg_share, 'rviz', 'rov_dry_dock.rviz')],
+            parameters=[{'use_sim_time': sim_time}],
+            condition=IfCondition(LaunchConfiguration('rviz'))
+        ),
+            
         Node(
             package='robot_state_publisher',
             executable='robot_state_publisher',
@@ -159,7 +164,8 @@ def launch_setup(context, *args, **kwargs):
                     os.path.join(pkg_share, 'description', 'dry_dock.urdf')
                 ).read(),
                 'frame_id': 'Beckholmen',   # publishes my_link relative to this frame
-            }]
+            }],
+            condition=IfCondition(LaunchConfiguration('rviz'))
         ),
 
 
@@ -193,6 +199,10 @@ def generate_launch_description():
                               description='true = full bag, false = cropped bag'),
         DeclareLaunchArgument('gicp', default_value='fast',
                               description='gicp backend: fast (fast_gicp) or small (small_gicp)'),
+        DeclareLaunchArgument('rviz', default_value='true',
+                              description='open rviz widow or not'),
+        DeclareLaunchArgument('sim_time', default_value='true',
+                              description='use sim_time or not'),
         OpaqueFunction(function=launch_setup),
     ])
 

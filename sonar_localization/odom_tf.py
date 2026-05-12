@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
-"""
-Publishes Beckholmen → map as a static TF.
-Uses StaticTransformBroadcaster so the transform never expires (unlike /tf
-which has a time-limited cache that breaks when sim time is paused).
 
-XY + yaw come from /initialpose; Z comes from the latest depth_odom message.
-Defaults to identity until an /initialpose is received.
-"""
 import math
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped
 from tf2_ros import StaticTransformBroadcaster
-from tf_transformations import quaternion_from_euler, euler_from_quaternion
+# from tf_transformations import quaternion_from_euler, euler_from_quaternion
+import numpy as np
 class OdomTfNode(Node):
 
     def __init__(self):
@@ -37,7 +31,7 @@ class OdomTfNode(Node):
         self.init_roll = self.get_parameter('init_roll').get_parameter_value().double_value
         self.init_pitch = self.get_parameter('init_pitch').get_parameter_value().double_value
 
-        q = quaternion_from_euler(self.init_roll, self.init_pitch, self.init_yaw, axes='sxyz')
+        q = self.quaternion_from_euler(self.init_roll, self.init_pitch, self.init_yaw)
         self._br = StaticTransformBroadcaster(self)
 
         # Publish identity immediately so the TF tree is connected from the start
@@ -53,12 +47,52 @@ class OdomTfNode(Node):
         self.get_logger().info(
             f"Publishing static TF {self.parent_frame} -> {self.child_frame}.")
 
+    def euler_from_quaternion(self, q):
+        # Using a more robust conversion to avoid math domain errors
+        qx = q[0]
+        qy = q[1]
+        qz = q[3]
+        qw = q[4]
+        sinr_cosp = 2 * (qw * qx + qy * qz)
+        cosr_cosp = 1 - 2 * (qx * qx + qy * qy)
+        roll = math.atan2(sinr_cosp, cosr_cosp)
+
+        sinp = 2 * (qw * qy - qz * qx)
+        # Avoid crash if sinp is slightly out of range [-1, 1] due to precision
+        if abs(sinp) >= 1:
+            pitch = math.copysign(math.pi / 2, sinp)
+        else:
+            pitch = math.asin(sinp)
+
+        siny_cosp = 2 * (qw * qz + qx * qy)
+        cosy_cosp = 1 - 2 * (qy * qy + qz * qz)
+        yaw = math.atan2(siny_cosp, cosy_cosp)
+
+        return roll, pitch, yaw
+
+    def quaternion_from_euler(self,roll, pitch, yaw):
+        """
+        Convert Euler angles (roll, pitch, yaw) to quaternion (x, y, z, w)
+        """
+        cy = np.cos(yaw * 0.5)
+        sy = np.sin(yaw * 0.5)
+        cp = np.cos(pitch * 0.5)
+        sp = np.sin(pitch * 0.5)
+        cr = np.cos(roll * 0.5)
+        sr = np.sin(roll * 0.5)
+
+        qw = cr * cp * cy + sr * sp * sy
+        qx = sr * cp * cy - cr * sp * sy
+        qy = cr * sp * cy + sr * cp * sy
+        qz = cr * cp * sy - sr * sp * cy
+
+        return np.array([qx, qy, qz, qw])
 
     def _initial_pose_cb(self, msg: PoseWithCovarianceStamped):
         p = msg.pose.pose.position
         q = msg.pose.pose.orientation
-        roll, pitch, yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
-        q_fixed = quaternion_from_euler(self.init_roll, self.init_pitch, yaw, axes='sxyz')
+        roll, pitch, yaw = self.euler_from_quaternion([q.x, q.y, q.z, q.w])
+        q_fixed = self.quaternion_from_euler(self.init_roll, self.init_pitch, yaw)
         self._publish_tf(p.x, p.y, self.init_z, q_fixed[0], q_fixed[1], q_fixed[2], q_fixed[3])
         self.get_logger().info(
             f"Initial pose set: [{p.x:.3f}, {p.y:.3f}, {self.init_z:.3f}]")

@@ -29,6 +29,8 @@ def generate_launch_description():
     # mode:=map       →  mapping node only
     mode = LaunchConfiguration('mode')
     ns   = LaunchConfiguration('ns')
+    rviz = LaunchConfiguration('rviz')
+    sim_time = LaunchConfiguration('sim_time')
 
     return LaunchDescription([
 
@@ -43,6 +45,10 @@ def generate_launch_description():
             default_value='',
             description='Namespace for the mapping node (e.g. ns:=robot1)',
         ),
+        DeclareLaunchArgument('rviz', default_value='true',
+                              description='open rviz widow or not'),
+        DeclareLaunchArgument('sim_time', default_value='true',
+                              description='use sim_time or not'),
 
         #### Topics Bridges ####
         Node(
@@ -67,7 +73,7 @@ def generate_launch_description():
             package='robot_localization',
             executable='ekf_node',
             name='ekf_global',
-            parameters=[ekf_config_path, {'use_sim_time': True}],
+            parameters=[ekf_config_path, {'use_sim_time': sim_time}],
         ),
 
         # TF
@@ -78,7 +84,7 @@ def generate_launch_description():
             arguments=[str(init_x), str(init_y), str(init_z),
                        str(angle), '0', '0',
                        'BlueROV2_Heavy/odom', 'odom'],
-            parameters=[{'use_sim_time': True}],
+            parameters=[{'use_sim_time': sim_time}],
         ),
 
         Node(
@@ -88,7 +94,7 @@ def generate_launch_description():
             arguments=[str(init_x), str(init_y), '-5.0',
                        '0', '0', '0',
                        'BlueROV2_Heavy/odom', 'prior_map'],
-            parameters=[{'use_sim_time': True}],
+            parameters=[{'use_sim_time': sim_time}],
         ),
 
         # ── Localize mode ──────────────────────────────────────
@@ -97,7 +103,7 @@ def generate_launch_description():
             executable='prior_map_publisher',
             name='prior_map_publisher',
             output='screen',
-            parameters=[localizer_config_path, {'use_sim_time': True}],
+            parameters=[localizer_config_path, {'use_sim_time': sim_time}],
             condition=IfCondition(PythonExpression(["'", mode, "' == 'prior'"])),
         ),
 
@@ -117,7 +123,7 @@ def generate_launch_description():
                     executable='prior_map_localizer',
                     name='prior_map_localizer',
                     output='screen',
-                    parameters=[localizer_config_path, {'use_sim_time': True}]
+                    parameters=[localizer_config_path, {'use_sim_time': sim_time}]
                 ),
 
         # RViz
@@ -126,5 +132,6 @@ def generate_launch_description():
             executable='rviz2',
             name='rviz2',
             arguments=['-d', rviz_config_path],
+            condition=IfCondition(LaunchConfiguration('rviz'))
         ),
     ])

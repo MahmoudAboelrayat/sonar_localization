@@ -7,13 +7,13 @@ odom_vgicp:
 
     topics:
       odom_pub: "vgicp_odom"
-      pc_sub: "/sonar/point_cloud_intensity"
+      pc_sub: "/sonar/point_cloud"
       deadreckoining_sub: "/odometry/filtered"
       map_pub: "vgicp_global_map"
    
     tuning:
       map_res: 0.2    
-      vgicp_threads: 6
+      vgicp_threads: 8
       vgicp_epsilon: 1e-4
       vgicp_max_dist: 2.0
       vgicp_max_iter: 100    
