@@ -33,10 +33,9 @@ def launch_setup(context, *args, **kwargs):
 
     depth_params = {'relative_depth': relative_depth, 'ned': ned}
     if depth_topic:
-        depth_params['input_topic'] = depth_topic
+        depth_params['rel_alt_topic'] = depth_topic
     if depth_frame:
         depth_params['frame_id'] = depth_frame
-
     return [
 
         Node(

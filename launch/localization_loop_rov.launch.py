@@ -45,6 +45,7 @@ def launch_setup(context, *args, **kwargs):
                 'dvl_frame': 'saabmarine/dvl_frame',
                 'depth_frame': 'icp_map',
                 'relative_depth': 'true',
+                'depth_topic':'/mavros/global_position/rel_alt',
                 'ned': 'true' if full_bag else 'false',
             }.items(),
         ),
