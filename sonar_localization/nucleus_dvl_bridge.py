@@ -15,7 +15,7 @@ class DvlBridge(Node):
         self.declare_parameter('frame_id', 'sam_auv_v1/dvl_link')
         self.frame_id = self.get_parameter('frame_id').get_parameter_value().string_value
 
-        self.declare_parameter('input_topic', '/saabmarine/core/dvl')
+        self.declare_parameter('input_topic', '/nucleus_node/bottom_track_packets')
         self.input_topic = self.get_parameter('input_topic').get_parameter_value().string_value
 
         self.sub = self.create_subscription(BottomTrack, self.input_topic, self.callback, 10)
