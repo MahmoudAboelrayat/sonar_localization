@@ -15,6 +15,7 @@ def launch_setup(context, *args, **kwargs):
     full_bag  = LaunchConfiguration('full_bag').perform(context).lower() in ('true', '1', 'yes')
     gicp_backend = LaunchConfiguration('gicp').perform(context).lower()  # 'fast' or 'small'
     sim_time = LaunchConfiguration('sim_time').perform(context).lower() in ('true', '1', 'yes')
+    dvl_type = LaunchConfiguration('dvl').perform(context).lower()  # 'nucleus' or 'waterlinked'
 
     if full_bag:
         init_x, init_y, init_z, init_yaw = 52.670, -2.4, 0.0, -0.096
@@ -29,7 +30,7 @@ def launch_setup(context, *args, **kwargs):
         else:
             vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_vgicp_rov.yaml')
 
-    executable = 'loopclosure_samll_vgicp' if gicp_backend == 'small' else 'loopclosure_vgicp'
+    icp_executable = 'loopclosure_samll_vgicp' if gicp_backend == 'small' else 'loopclosure_vgicp'
 
     return [
 
@@ -136,7 +137,7 @@ def launch_setup(context, *args, **kwargs):
         # vgicp odometry
         Node(
             package='sonar_localization',
-            executable=executable,
+            executable=icp_executable,
             name='odom_vgicp',
             output='screen',
             parameters=[vgicp_config_path]
