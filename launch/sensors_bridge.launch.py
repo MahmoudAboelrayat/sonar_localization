@@ -8,26 +8,34 @@ from launch.conditions import IfCondition
 
 
 def launch_setup(context, *args, **kwargs):
-    pkg_share = get_package_share_directory('sonar_localization')
+    dvl_type = LaunchConfiguration('dvl_type').perform(context).lower()  # 'nucleus' or 'waterlinked' or 'sim'
 
-    sim_time = LaunchConfiguration('sim_time').perform(context).lower() in ('true', '1', 'yes')
-    dvl_type = LaunchConfiguration('dvl').perform(context).lower()  # 'nucleus' or 'waterlinked' or 'sim'
+    dvl_topic = LaunchConfiguration('dvl_topic').perform(context)
+    dvl_frame = LaunchConfiguration('dvl_frame').perform(context)
 
-    dvl_topic = LaunchConfiguration('dvl_topic')
-    dvl_frame = LaunchConfiguration('dvl_frame')
-
-    depth_topic = LaunchConfiguration('depth_topic')
-    depth_frame = LaunchConfiguration('dvl_frame')
+    depth_topic = LaunchConfiguration('depth_topic').perform(context)
+    depth_frame = LaunchConfiguration('depth_frame').perform(context)
     relative_depth = LaunchConfiguration('relative_depth').perform(context).lower() in ('true', '1', 'yes')
-    ned = LaunchConfiguration('relative_depth').perform(context).lower() in ('true', '1', 'yes')
-
+    ned = LaunchConfiguration('ned').perform(context).lower() in ('true', '1', 'yes')
 
     if dvl_type == 'nucleus':
         dvl_ex = 'nucleus_dvl_bridge'
     elif dvl_type == 'waterlinked':
         dvl_ex = 'waterlinked_dvl_bridge'
     else:
-        dvl_ex = 'sim_dvl_briddg'
+        dvl_ex = 'sim_dvl_bridge'
+
+    dvl_params = {'relative_depth': relative_depth, 'ned': ned}
+    if dvl_topic:
+        dvl_params['input_topic'] = dvl_topic
+    if dvl_frame:
+        dvl_params['frame_id'] = dvl_frame
+
+    depth_params = {'relative_depth': relative_depth, 'ned': ned}
+    if depth_topic:
+        depth_params['input_topic'] = depth_topic
+    if depth_frame:
+        depth_params['frame_id'] = depth_frame
 
     return [
 
@@ -36,7 +44,7 @@ def launch_setup(context, *args, **kwargs):
             executable=dvl_ex,
             name='dvl_bridge',
             output='screen',
-            parameters=[{'frame_id':dvl_frame, 'input_topic': dvl_topic}],
+            parameters=[dvl_params],
         ),
 
         Node(
@@ -44,7 +52,8 @@ def launch_setup(context, *args, **kwargs):
             executable='depth_bridge',
             name='depth_bridge',
             output='screen',
-            parameters=[{'frame_id': 'icp_map','rel_alt_topic': '/mavros/global_position/rel_alt','relative_depth':True,"ned": full_bag}],),
+            parameters=[depth_params],
+        ),
 
     ]
 
@@ -54,17 +63,17 @@ def generate_launch_description():
         DeclareLaunchArgument('dvl_type', default_value='waterlinked',
                               description='dvl model: (nucleus) or (waterlinked) or (sim)'),
 
-        DeclareLaunchArgument('dvl_topic', default_value='/saabmarine/core/dvl',
-                              description='dvl_topic'),
+        DeclareLaunchArgument('dvl_topic', default_value='',
+                              description='dvl input topic (leave empty to use node default)'),
 
-        DeclareLaunchArgument('dvl_frame', default_value='saabmarine/dvl_frame',
-                                    description='dvl TF frame'),
+        DeclareLaunchArgument('dvl_frame', default_value='',
+                              description='dvl TF frame (leave empty to use node default)'),
 
-        DeclareLaunchArgument('depth_topic', default_value='/saabmarine/core/dvl',
-                              description='depth senosr topic'),
+        DeclareLaunchArgument('depth_topic', default_value='',
+                              description='depth sensor topic (leave empty to use node default)'),
 
-        DeclareLaunchArgument('dvl_frame', default_value='saabmarine/dvl_frame',
-                                    description='depth TF frame'),
+        DeclareLaunchArgument('depth_frame', default_value='',
+                              description='depth TF frame (leave empty to use node default)'),
 
         DeclareLaunchArgument('relative_depth', default_value='True',
                                     description='is the depth relative or absolute'),

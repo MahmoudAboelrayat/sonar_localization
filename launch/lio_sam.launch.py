@@ -2,6 +2,9 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 
 def generate_launch_description():
     pkg_share = get_package_share_directory('sonar_localization')
@@ -12,21 +15,16 @@ def generate_launch_description():
     lio_rviz = os.path.join(lio_pkg,'config', 'rviz2.rviz')
     return LaunchDescription([
 
-        #### Topics Bridges ####
-        Node(
-            package='sonar_localization',
-            executable='dvl_bridge',
-            name='dvl_bridge',
-            output='screen',
-            parameters=[],
-        ),
+        DeclareLaunchArgument('dvl_type', default_value='sim',
+                              description='dvl model: (nucleus) or (waterlinked) or (sim)'),
 
-        Node(
-            package='sonar_localization',
-            executable='depth_bridge',
-            name='depth_bridge',
-            output='screen',
-            parameters=[],),
+        #### Topics Bridges ####
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(pkg_share, 'launch', 'sensors_bridge.launch.py')
+            ),
+            launch_arguments={'dvl_type': LaunchConfiguration('dvl_type')}.items(),
+        ),
 
         
         Node(

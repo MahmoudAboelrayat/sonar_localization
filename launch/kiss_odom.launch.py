@@ -2,7 +2,8 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
 
@@ -31,20 +32,18 @@ def launch_setup(context, *args, **kwargs):
     return [
 
         #### Topics Bridges ####
-        Node(
-            package='sonar_localization',
-            executable='dvl_bridge',
-            name='dvl_bridge',
-            output='screen',
-            parameters=[{'sim': False, 'frame_id':'saabmarine/dvl_frame'}],
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(pkg_share, 'launch', 'sensors_bridge.launch.py')
+            ),
+            launch_arguments={
+                'dvl_type': LaunchConfiguration('dvl_type').perform(context),
+                'dvl_frame': 'saabmarine/dvl_frame',
+                'depth_frame': 'icp_map',
+                'relative_depth': 'true',
+                'ned': 'true' if full_bag else 'false',
+            }.items(),
         ),
-
-        Node(
-            package='sonar_localization',
-            executable='depth_bridge',
-            name='depth_bridge',
-            output='screen',
-            parameters=[{'frame_id': 'icp_map','rel_alt_topic': '/mavros/global_position/rel_alt','relative_depth':True,"ned": full_bag}],),
 
             
         #### EKF Nodes ####
@@ -189,6 +188,8 @@ def launch_setup(context, *args, **kwargs):
 
 def generate_launch_description():
     return LaunchDescription([
+        DeclareLaunchArgument('dvl_type', default_value='waterlinked',
+                              description='dvl model: (nucleus) or (waterlinked) or (sim)'),
         DeclareLaunchArgument('full_bag', default_value='true',
                               description='true = full bag, false = cropped bag'),
         DeclareLaunchArgument('gicp', default_value='fast',

@@ -2,6 +2,9 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 
 def generate_launch_description():
     pkg_share = get_package_share_directory('sonar_localization')
@@ -9,21 +12,20 @@ def generate_launch_description():
     vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_vgicp_rov.yaml')
     return LaunchDescription([
 
-        #### Topics Bridges ####
-        Node(
-            package='sonar_localization',
-            executable='dvl_bridge',
-            name='dvl_bridge',
-            output='screen',
-            parameters=[{'sim': False, 'frame_id':'saabmarine/dvl_frame'}],
-        ),
+        DeclareLaunchArgument('dvl_type', default_value='waterlinked',
+                              description='dvl model: (nucleus) or (waterlinked) or (sim)'),
 
-        Node(
-            package='sonar_localization',
-            executable='depth_bridge',
-            name='depth_bridge',
-            output='screen',
-            parameters=[{'frame_id': 'Beckholmen','rel_alt_topic': '/mavros/global_position/rel_alt'}],),
+        #### Topics Bridges ####
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(pkg_share, 'launch', 'sensors_bridge.launch.py')
+            ),
+            launch_arguments={
+                'dvl_type': LaunchConfiguration('dvl_type'),
+                'dvl_frame': 'saabmarine/dvl_frame',
+                'depth_frame': 'Beckholmen',
+            }.items(),
+        ),
 
             
         #### EKF Nodes ####

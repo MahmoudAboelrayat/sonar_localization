@@ -206,9 +206,17 @@ install(PROGRAMS ${PROJECT_NAME}/gt_map.py
         DESTINATION lib/${PROJECT_NAME} 
         RENAME gt_map)
 
-install(PROGRAMS ${PROJECT_NAME}/dvl_bridge.py 
-        DESTINATION lib/${PROJECT_NAME} 
-        RENAME dvl_bridge)
+install(PROGRAMS ${PROJECT_NAME}/nucleus_dvl_bridge.py
+        DESTINATION lib/${PROJECT_NAME}
+        RENAME nucleus_dvl_bridge)
+
+install(PROGRAMS ${PROJECT_NAME}/waterlinked_dvl_bridge.py
+        DESTINATION lib/${PROJECT_NAME}
+        RENAME waterlinked_dvl_bridge)
+
+install(PROGRAMS ${PROJECT_NAME}/sim_dvl_bridge.py
+        DESTINATION lib/${PROJECT_NAME}
+        RENAME sim_dvl_bridge)
 
 install(PROGRAMS ${PROJECT_NAME}/imu_bridge.py 
         DESTINATION lib/${PROJECT_NAME} 
