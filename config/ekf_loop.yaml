@@ -6,15 +6,15 @@ ekf_local:
 
     map_frame: "icp_map"
     odom_frame: "ekf_odom"
-    base_link_frame: "saabmarine/base_link"
+    base_link_frame: "base_link"
     world_frame: "ekf_odom"    
 
     # IMU (Angular Velocity & Linear Accel)
-    imu0: "/mavros/imu/data"
+    imu0: "/dvl/imu"
     imu0_config: [false, false, false,
-                  true, true, false,
                   false, false, false,
-                  false,  false,  true,
+                  false, false, false,
+                  true,  true,  true,
                   false,  false,  false]
     imu0_differential: false
     imu0_relative: false
@@ -24,13 +24,13 @@ ekf_local:
 
 
     # DVL (Linear Velocity)
-    twist0: "/dvl"
+    twist0: "/dvl/velocity"
     twist0_config: [false, false, false,
                     false, false, false,
                     true,  true,  false,   # X, Y, Z velocities
                     false, false, false,
                     false, false, false]
-
+    twist0_rejection_threshold: 2.0
 
 
 ekf_global:
@@ -43,14 +43,14 @@ ekf_global:
 
     map_frame: "icp_map"
     odom_frame: "ekf_odom"
-    base_link_frame: "saabmarine/base_link"
+    base_link_frame: "base_link"
     world_frame: "icp_map"  
 
-    imu0: "/mavros/imu/data"
+    imu0: "/dvl/imu"
     imu0_config: [false, false, false,
-                  true, true, false,
                   false, false, false,
-                  false,  false,  true,
+                  false, false, false,
+                  true,  true,  true,
                   false,  false,  false]
     imu0_differential: false
     imu0_relative: false
@@ -58,13 +58,13 @@ ekf_global:
     # imu0_pose_rejection_threshold: 0.8      
     # imu0_twist_rejection_threshold: 0.8
 
-    twist0: "/dvl"
+    twist0: "/dvl/velocity"
     twist0_config: [false, false, false,
                     false, false, false,
                     true,  true,  false,
                     false, false, false,
                     false, false, false]
-
+    twist0_rejection_threshold: 2.0
     pose0: "/depth_odom"
     pose0_config: [false, false, true,    
                    false, false, false,

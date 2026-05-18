@@ -250,6 +250,10 @@ install(PROGRAMS ${PROJECT_NAME}/odom_tf.py
         DESTINATION lib/${PROJECT_NAME}
         RENAME odom_tf)
 
+install(PROGRAMS ${PROJECT_NAME}/nucleus_imu_bridge.py
+        DESTINATION lib/${PROJECT_NAME}
+        RENAME nucleus_imu_bridge)
+
 # Install Shared Directories
 install(DIRECTORY launch config rviz description
   DESTINATION share/${PROJECT_NAME}

@@ -51,8 +51,8 @@ class OdomTfNode(Node):
         # Using a more robust conversion to avoid math domain errors
         qx = q[0]
         qy = q[1]
-        qz = q[3]
-        qw = q[4]
+        qz = q[2]
+        qw = q[3]
         sinr_cosp = 2 * (qw * qx + qy * qz)
         cosr_cosp = 1 - 2 * (qx * qx + qy * qy)
         roll = math.atan2(sinr_cosp, cosr_cosp)

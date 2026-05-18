@@ -3,7 +3,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch.conditions import IfCondition
 
 
@@ -41,7 +41,7 @@ def launch_setup(context, *args, **kwargs):
         Node(
             package='sonar_localization',
             executable=dvl_ex,
-            name='dvl_bridge',
+            name=dvl_ex,
             output='screen',
             parameters=[dvl_params],
         ),
@@ -54,12 +54,20 @@ def launch_setup(context, *args, **kwargs):
             parameters=[depth_params],
         ),
 
+        Node(
+            package='sonar_localization',
+            executable='nucleus_imu_bridge',
+            name='nucleus_imu_bridge',
+            output='screen',
+            condition=IfCondition(PythonExpression(["'", dvl_type, "' == 'nucleus'"])),
+        ),
+
     ]
 
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('dvl_type', default_value='waterlinked',
+        DeclareLaunchArgument('dvl_type', default_value='nucleus',
                               description='dvl model: (nucleus) or (waterlinked) or (sim)'),
 
         DeclareLaunchArgument('dvl_topic', default_value='',

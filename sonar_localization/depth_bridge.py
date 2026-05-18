@@ -15,7 +15,7 @@ class DepthToOdom(Node):
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=1
         )
-        self.declare_parameter("global_pos_topic", "/mavros/global_position/global")
+        self.declare_parameter("global_pos_topic", "global_position/global")
         self.declare_parameter("rel_alt_topic", "/sam_auv_v1/smarc/dep")
         self.declare_parameter("output_topic", "depth_odom")
         self.declare_parameter("relative_depth", True)
@@ -30,7 +30,7 @@ class DepthToOdom(Node):
         self.declare_parameter("sim", True)
         self.sim = self.get_parameter("sim").get_parameter_value().bool_value
 
-        self.declare_parameter("frame_id", "sam_auv_v1/odom")
+        self.declare_parameter("frame_id", "base_link")
         self.frame_id = self.get_parameter("frame_id").get_parameter_value().string_value
 
         self.declare_parameter("depth_cov", 1e-4)

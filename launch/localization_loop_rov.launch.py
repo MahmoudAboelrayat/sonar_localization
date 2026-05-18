@@ -13,11 +13,13 @@ def launch_setup(context, *args, **kwargs):
     ekf_config_path = os.path.join(pkg_share, 'config', 'ekf_loop.yaml')
 
     rviz_flag  = LaunchConfiguration('rviz').perform(context).lower() in ('true', '1', 'yes')
+    use_dock = LaunchConfiguration('dock').perform(context).lower() in ('true', '1', 'yes')
     full_bag  = LaunchConfiguration('full_bag').perform(context).lower() in ('true', '1', 'yes')
     gicp_backend = LaunchConfiguration('gicp').perform(context).lower()  # 'fast' or 'small'
     sim_time = LaunchConfiguration('sim_time').perform(context).lower() in ('true', '1', 'yes')
     dvl_type = LaunchConfiguration('dvl_type').perform(context).lower()
 
+    state_publisher = True if(rviz_flag and use_dock)else False
     if full_bag:
         init_x, init_y, init_z, init_yaw = 52.670, -2.4, 0.0, -0.096
         if gicp_backend == 'small':
@@ -25,7 +27,9 @@ def launch_setup(context, *args, **kwargs):
         else:
             vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_vgicp_rov_full.yaml')
     else:
-        init_x, init_y, init_z, init_yaw = 38.529, -2.881, -1.5, -3.031
+        # init_x, init_y, init_z, init_yaw = 38.529, -2.881, -1.5, -3.031
+        init_x, init_y, init_z, init_yaw = 0.0, 0.0, 0.0, 0.0
+
         if gicp_backend == 'small':
             vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_small_vgicp_rov.yaml')
         else:
@@ -42,11 +46,11 @@ def launch_setup(context, *args, **kwargs):
             ),
             launch_arguments={
                 'dvl_type': dvl_type,
-                'dvl_frame': 'saabmarine/dvl_frame',
+                'dvl_frame': 'bluerov2/dvl_frame',
                 'depth_frame': 'icp_map',
-                'relative_depth': 'true',
-                'depth_topic':'/mavros/global_position/rel_alt',
-                'ned': 'true' if full_bag else 'false',
+                'relative_depth': 'false',
+                'depth_topic':'/global_position/rel_alt',
+                'ned': 'false',
             }.items(),
         ),
 
@@ -72,20 +76,20 @@ def launch_setup(context, *args, **kwargs):
 
 
         # TF
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_link_to_imu',
-            arguments=['0', '0', '0','0.0', '0', '3.14159265359', 'saabmarine/base_link', 'base_link'],
-            parameters=[{'use_sim_time': sim_time}]
-        ),
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_link_to_gps',
-            arguments=['0', '0', '0', '3.1415', '0', '0.0', 'saabmarine/base_link', 'gps'],
-            parameters=[{'use_sim_time': sim_time}]
-        ),
+        # Node(
+        #     package='tf2_ros',
+        #     executable='static_transform_publisher',
+        #     name='base_link_to_imu',
+        #     arguments=['0', '0', '0','0.0', '0', '3.14159265359', 'saabmarine/base_link', 'base_link'],
+        #     parameters=[{'use_sim_time': sim_time}]
+        # ),
+        # Node(
+        #     package='tf2_ros',
+        #     executable='static_transform_publisher',
+        #     name='base_link_to_gps',
+        #     arguments=['0', '0', '0', '3.1415', '0', '0.0', 'saabmarine/base_link', 'gps'],
+        #     parameters=[{'use_sim_time': sim_time}]
+        # ),
          Node(
             package='tf2_ros',
             executable='static_transform_publisher',
@@ -93,20 +97,29 @@ def launch_setup(context, *args, **kwargs):
             arguments=['0', '0', '0', '0.0', '0', '3.14159265359', 'world', 'Beckholmen'],
             parameters=[{'use_sim_time': sim_time}]),
 
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_link_to_sonar',
-            arguments=['0.220', '0', '-0.160', '0.0', '-0.524', '0.0', 'saabmarine/base_link', 'saabmarine/sonar_link'],
-            parameters=[{'use_sim_time': sim_time}]
-        ),
+        # Node(
+        #     package='tf2_ros',
+        #     executable='static_transform_publisher',
+        #     name='base_link_to_sonar',
+        #     arguments=['0.220', '0', '-0.160', '0.0', '-0.524', '0.0', 'saabmarine/base_link', 'saabmarine/sonar_link'],
+        #     parameters=[{'use_sim_time': sim_time}]
+        # ),
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_link_to_dvl',
-            arguments=['-0.150', '-0.150', '0.150', '0.0', '0.0', '0.0', 'saabmarine/base_link', 'saabmarine/dvl_frame'],
+            arguments=['-0.150', '-0.150', '0.150', '0.0', '0.0', '0.0', 'base_link', 'bluerov2/dvl_frame'],
             parameters=[{'use_sim_time': sim_time}]
         ),
+
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_dvl',
+            arguments=['-0.150', '-0.150', '0.150', '0.0', '0.0', '0.0', 'base_link', 'bluerov2/dvl_imu'],
+            parameters=[{'use_sim_time': sim_time}]
+        ),
+
 
         # Node(
         #     package='tf2_ros',
@@ -131,7 +144,7 @@ def launch_setup(context, *args, **kwargs):
             executable='odom_tf',
             name='map_tf',
             output='screen',
-            parameters=[{'parent_frame': 'Beckholmen', 'child_frame': 'icp_map', 'use_sim_time': sim_time, 'init_x': init_x, 'init_y': init_y, 'init_z': init_z, 'init_yaw': init_yaw,'init_roll':0.0,'init_pitch':0.0}]
+            parameters=[{'parent_frame': 'world', 'child_frame': 'icp_map', 'use_sim_time': sim_time, 'init_x': init_x, 'init_y': init_y, 'init_z': init_z, 'init_yaw': init_yaw,'init_roll':0.0,'init_pitch':0.0}]
         ),
 
         # vgicp odometry
@@ -166,7 +179,7 @@ def launch_setup(context, *args, **kwargs):
                 ).read(),
                 'frame_id': 'Beckholmen',   # publishes my_link relative to this frame
             }],
-            condition=IfCondition(LaunchConfiguration('rviz'))
+            condition=IfCondition(LaunchConfiguration('dock'))
         ),
 
 
@@ -196,16 +209,18 @@ def launch_setup(context, *args, **kwargs):
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('dvl_type', default_value='waterlinked',
+        DeclareLaunchArgument('dvl_type', default_value='nucleus',
                               description='dvl model: (nucleus) or (waterlinked) or (sim)'),
-        DeclareLaunchArgument('full_bag', default_value='true',
+        DeclareLaunchArgument('full_bag', default_value='fasle',
                               description='true = full bag, false = cropped bag'),
         DeclareLaunchArgument('gicp', default_value='fast',
                               description='gicp backend: fast (fast_gicp) or small (small_gicp)'),
         DeclareLaunchArgument('rviz', default_value='true',
                               description='open rviz widow or not'),
-        DeclareLaunchArgument('sim_time', default_value='true',
+        DeclareLaunchArgument('sim_time', default_value='false',
                               description='use sim_time or not'),
+        DeclareLaunchArgument('dock', default_value='false',
+                        description='use the dry dock model'),                 
         OpaqueFunction(function=launch_setup),
     ])
 
