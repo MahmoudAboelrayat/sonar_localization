@@ -1,29 +1,32 @@
 loopclosure_vgicp:
   ros__parameters:
+    ekf_max_age: 1.0
     topics:
       odom_pub: "vgicp_odom"
-      # pc_sub: "/sonar/local_point_cloud_noisy"
-      pc_sub: "/sonar/point_cloud_local"
+      pc_sub: "/sonar/point_cloud_noisy"
+      # pc_sub: "/sonar/point_cloud_local"
       deadreckoining_sub: "/odometry/filtered"
       map_pub: "vgicp_global_map"
 
     tuning:
-      map_res: 0.2   
-      vgicp_threads: 4      
+      map_res: 0.4
+      min_ekf_msgs: 1
+      max_lost_frames: 80
+      vgicp_threads: 6      
       vgicp_epsilon: 1e-4
-      vgicp_max_dist: 4.5
+      vgicp_max_dist: 1.0
       vgicp_max_iter: 100  
-      vgicp_resolution: 0.25
+      vgicp_resolution: 0.4
 
     loop_closure:
       search_radius: 15.0
-      fitness_score: 0.4
+      fitness_score: 0.8
       history_gap: 25
-      submap_size: 5
+      submap_size: 15
       vgicp_epsilon: 1e-4
-      vgicp_max_dist: 2.0 
+      vgicp_max_dist: 1.5
       vgicp_max_iter: 100  
-      vgicp_resolution: 0.3
+      vgicp_resolution: 0.4
     
     tf:
       sonar2base_x: 0.007
@@ -38,16 +41,16 @@ loopclosure_vgicp:
     #   dist_thresh:   1.0   
     #   angle_thresh:  10.0    # degrees 
     keyframe:
-      submap_size:   25      
-      dist_thresh:   0.5     
+      submap_size:   40    
+      dist_thresh:   0.8     
       angle_thresh:  5.0    # degrees 
     gtsam:
       odom_noise_roll: 0.1
       odom_noise_pitch: 0.1
-      odom_noise_yaw: 0.3
-      odom_noise_x: 0.5
-      odom_noise_y: 0.5
-      odom_noise_z: 0.3
+      odom_noise_yaw: 0.25
+      odom_noise_x: 0.25
+      odom_noise_y: 0.25
+      odom_noise_z: 0.1
       lc_noise_roll: 0.01
       lc_noise_pitch: 0.01
       lc_noise_yaw: 0.01

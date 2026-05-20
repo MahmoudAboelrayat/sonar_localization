@@ -1,6 +1,6 @@
 ekf_local:
   ros__parameters:
-    frequency: 5.0
+    frequency: 20.0
     two_d_mode: true
     publish_tf: false
 

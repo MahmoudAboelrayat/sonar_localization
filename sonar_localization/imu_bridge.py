@@ -30,11 +30,11 @@ class ImuNoiseBridge(Node):
 
         # CONFIGURATION: Set your noise levels (Standard Deviations)
         self.linear_accel_noise = 9.4e-8  # m/s^2
-        self.angular_vel_noise = 5.7e-8   # rad/s
-        self.orientation_noise_deg = 5e-8 # Degrees of jitter
+        # self.angular_vel_noise = 5.7e-8   # rad/s
+        # self.orientation_noise_deg = 5e-8 # Degrees of jitter
 
-        # self.angular_vel_noise = 1e-1   # rad/s
-        # self.orientation_noise_deg = 1e-1 # Degrees of jitter
+        self.angular_vel_noise = 1e-2   # rad/s
+        self.orientation_noise_deg = 1e-2 # Degrees of jitter
         
         self.orientation_noise_rad = np.radians(self.orientation_noise_deg)
 

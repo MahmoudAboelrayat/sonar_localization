@@ -795,6 +795,8 @@ private:
                 std::lock_guard<std::mutex> pose_lock(pose_mutex_);
                 global_pose_   = initial_guess;
                 prev_ekf_pose_ = current_ekf_pose;
+                // RCLCPP_INFO(get_logger(), "tracking lost frame %d:",lost_frames_);
+
             } else {
                 RCLCPP_WARN(get_logger(), "Tracking lost — restarting SLAM.");
                 lost_frames_ = 0;
