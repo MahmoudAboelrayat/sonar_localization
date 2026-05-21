@@ -33,7 +33,7 @@ def launch_setup(context, *args, **kwargs):
         if gicp_backend == 'small':
             vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_small_vgicp_rov.yaml')
         else:
-            vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_vgicp_rov.yaml')
+            vgicp_config_path = os.path.join(pkg_share, 'config', 'vgicp_tank.yaml')
 
     icp_executable = 'loopclosure_samll_vgicp' if gicp_backend == 'small' else 'loopclosure_vgicp'
 

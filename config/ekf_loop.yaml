@@ -58,6 +58,16 @@ ekf_global:
     # imu0_pose_rejection_threshold: 0.8      
     # imu0_twist_rejection_threshold: 0.8
 
+    # imu1: "/imu/data"
+    # imu1_config: [false, false, false,
+    #               true, true, true,
+    #               false, false, false,
+    #               true,  true,  true,
+    #               false,  false,  false]
+    # imu1_differential: false
+    # imu1_relative: false
+    # imu1_remove_gravitational_acceleration: true
+
     twist0: "/dvl/velocity"
     twist0_config: [false, false, false,
                     false, false, false,
