@@ -1,0 +1,100 @@
+localization_imu_pre:
+  ros__parameters:
+    is_ned: false
+    ekf_z: true
+    loop_ekf_z: true
+    ekf_max_age: 0.1
+
+    topics:
+      odom_pub: "vgicp_odom"
+      pc_sub: "/sonar/point_cloud"
+      deadreckoining_sub: "/odometry/filtered"
+      map_pub: "vgicp_global_map"
+      imu_sub: "/dvl/imu"
+      dvl_sub: "/dvl/velocity"
+
+    tuning:
+      map_res: 0.2
+      vgicp_threads: 8
+      vgicp_epsilon: 1e-4
+      vgicp_max_dist: 1.5
+      vgicp_max_iter: 100
+      vgicp_resolution: 0.3
+      max_lost_frames: 40
+
+    radius_outlier_removal:
+      filter_radius_outliers: true
+      radius_search: 0.2
+      min_neighbors_in_radius: 30
+
+    outlier_removal:
+      filter_outliers: true
+      num_neighbors: 30
+      stddev_mul_thresh: 0.7
+
+    intensity_filter:
+      filter_intensity: false
+      min_intensity: 0.005
+
+    tf:
+      sonar2base_x: -0.111
+      sonar2base_y: 0.000
+      sonar2base_z: 0.249
+      sonar2base_roll: 0.0
+      sonar2base_pitch: 30.0   # degrees (- down / + up)
+      sonar2base_yaw: 0.0
+
+      # IMU mounting — rotation from IMU frame to base_link
+      imu2base_roll:  0.0      # degrees
+      imu2base_pitch: 0.0
+      imu2base_yaw:   0.0
+      # IMU lever arm — translation from base_link to IMU in base_link frame
+      imu2base_x: 0.0          # meters
+      imu2base_y: 0.0
+      imu2base_z: 0.0
+
+    keyframe:
+      submap_size: 30
+      dist_thresh: 1.0
+      angle_thresh: 8.0        # degrees
+
+    loop_closure:
+      search_radius: 15.0
+      fitness_score: 0.2
+      history_gap: 20
+      submap_size: 10
+      vgicp_epsilon: 1e-4
+      vgicp_max_dist: 4.0
+      vgicp_max_iter: 100
+      vgicp_resolution: 0.3
+      use_ndt: false
+      ndt_resolution: 1.0
+      ndt_step_size: 1.0
+      ndt_max_iter: 150
+      ndt_epsilon: 0.01
+
+    gtsam:
+      odom_noise_x: 0.0120
+      odom_noise_y: 0.0120
+      odom_noise_z: 0.001
+      odom_noise_roll: 0.001
+      odom_noise_pitch: 0.001
+      odom_noise_yaw: 0.0125
+
+    imu:
+      use_imu: false            # set true to enable IMU preintegration
+      accel_noise: 0.01         # accelerometer white noise [m/s^2]
+      gyro_noise: 0.001         # gyroscope white noise [rad/s]
+      accel_bias_noise: 1.0e-4  # accelerometer bias random walk
+      gyro_bias_noise: 1.0e-5   # gyroscope bias random walk
+      gravity: -9.89
+
+    dvl:
+      use_dvl: true            # set true to enable DVL velocity factor
+      noise_x: 0.05             # [m/s]
+      noise_y: 0.05
+      noise_z: 0.05
+
+    frames:
+      odom_frame: "icp_map"
+      base_frame: "saabmarine/base_link"

@@ -112,6 +112,23 @@ target_link_libraries(fastvgicp_odom
   ${PCL_LIBRARIES}
 )
 
+# Node: localization_imu_pre (VGICP SLAM + IMU preintegration + DVL factor)
+add_executable(localization_imu_pre src/localization_imu_pre.cpp)
+ament_target_dependencies(localization_imu_pre
+  rclcpp sensor_msgs nav_msgs geometry_msgs
+  visualization_msgs pcl_conversions pcl_ros
+  fast_gicp GTSAM
+)
+target_include_directories(localization_imu_pre PUBLIC
+  ${GTSAM_INCLUDE_DIR}
+  ${PCL_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+)
+target_link_libraries(localization_imu_pre
+  ${PCL_LIBRARIES}
+  gtsam
+)
+
 # Node: imu_preintegration
 add_executable(imu_preintegration src/imu_preintegration.cpp)
 ament_target_dependencies(imu_preintegration
@@ -176,6 +193,7 @@ target_link_libraries(prior_map_publisher
 
 # Install C++ Executables
 install(TARGETS
+  localization_imu_pre
   loopclosure_vgicp
   loopclosure_samll_vgicp
   prior_map_localizer
