@@ -12,7 +12,7 @@ class DvlBridge(Node):
         super().__init__("dvl_bridge")
         self.get_logger().info("DVL bridge")
 
-        self.declare_parameter('frame_id', 'bluerov2/dvl_link')
+        self.declare_parameter('frame_id', 'dvl_link')
         self.frame_id = self.get_parameter('frame_id').get_parameter_value().string_value
 
         self.declare_parameter('input_topic', '/nucleus_node/bottom_track_packets')

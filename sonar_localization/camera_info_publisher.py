@@ -28,7 +28,7 @@ class CameraInfoPublisher(Node):
     def __init__(self):
         super().__init__('camera_info_publisher')
 
-        self.declare_parameter('calibration_file', 'calibration.json',
+        self.declare_parameter('calibration_file', '/home/thor/sonar_ws/src/sonar_localization/config/calibration.json',
             ParameterDescriptor(description='Path to calibration JSON from cam_calb.py'))
         self.declare_parameter('topic', '/camera/camera_info',
             ParameterDescriptor(description='Topic to publish CameraInfo on'))

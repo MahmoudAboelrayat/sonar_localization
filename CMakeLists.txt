@@ -112,37 +112,6 @@ target_link_libraries(fastvgicp_odom
   ${PCL_LIBRARIES}
 )
 
-# Node: localization_imu_pre (VGICP SLAM + IMU preintegration + DVL factor)
-add_executable(localization_imu_pre src/localization_imu_pre.cpp)
-ament_target_dependencies(localization_imu_pre
-  rclcpp sensor_msgs nav_msgs geometry_msgs
-  visualization_msgs pcl_conversions pcl_ros
-  fast_gicp GTSAM
-)
-target_include_directories(localization_imu_pre PUBLIC
-  ${GTSAM_INCLUDE_DIR}
-  ${PCL_INCLUDE_DIRS}
-  ${EIGEN3_INCLUDE_DIRS}
-)
-target_link_libraries(localization_imu_pre
-  ${PCL_LIBRARIES}
-  gtsam
-)
-
-# Node: imu_preintegration
-add_executable(imu_preintegration src/imu_preintegration.cpp)
-ament_target_dependencies(imu_preintegration
-  rclcpp sensor_msgs nav_msgs geometry_msgs
-  GTSAM
-)
-target_include_directories(imu_preintegration PUBLIC 
-  ${GTSAM_INCLUDE_DIR} 
-  ${EIGEN3_INCLUDE_DIRS}
-)
-target_link_libraries(imu_preintegration 
-  gtsam
-)
-
 
 # Node: loopclosure_samll_vgicp (small_gicp version)
 add_executable(loopclosure_samll_vgicp src/loopclosure_samll_vgicp.cpp)
@@ -193,7 +162,7 @@ target_link_libraries(prior_map_publisher
 
 # Install C++ Executables
 install(TARGETS
-  localization_imu_pre
+  #localization_imu_pre
   loopclosure_vgicp
   loopclosure_samll_vgicp
   prior_map_localizer
@@ -202,7 +171,7 @@ install(TARGETS
   gicp_odom
   fastgicp_odom
   fastvgicp_odom
-  imu_preintegration
+  #imu_preintegration
   mapping
   DESTINATION lib/${PROJECT_NAME}
 )
@@ -223,6 +192,14 @@ install(TARGETS
 install(PROGRAMS ${PROJECT_NAME}/gt_map.py 
         DESTINATION lib/${PROJECT_NAME} 
         RENAME gt_map)
+
+install(PROGRAMS ${PROJECT_NAME}/video.py 
+        DESTINATION lib/${PROJECT_NAME} 
+        RENAME video)
+
+install(PROGRAMS ${PROJECT_NAME}/image_comp.py 
+        DESTINATION lib/${PROJECT_NAME} 
+        RENAME image_comp)
 
 install(PROGRAMS ${PROJECT_NAME}/nucleus_dvl_bridge.py
         DESTINATION lib/${PROJECT_NAME}
