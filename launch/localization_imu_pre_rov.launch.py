@@ -33,7 +33,7 @@ def launch_setup(context, *args, **kwargs):
             ),
             launch_arguments={
                 'dvl_type':       dvl_type,
-                'dvl_frame':      'bluerov2/dvl_frame',
+                'dvl_frame':      'dvl_link',
                 'depth_frame':    'icp_map',
                 'relative_depth': 'false',
                 'depth_topic':    '/global_position/rel_alt',
@@ -66,22 +66,22 @@ def launch_setup(context, *args, **kwargs):
             arguments=['0', '0', '0', '0.0', '0', '3.14159265359', 'world', 'Beckholmen'],
             parameters=[{'use_sim_time': sim_time}]
         ),
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_link_to_dvl',
-            arguments=['-0.150', '-0.150', '0.150', '0.0', '0.0', '0.0',
-                       'base_link', 'bluerov2/dvl_frame'],
-            parameters=[{'use_sim_time': sim_time}]
-        ),
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_link_to_dvl_imu',
-            arguments=['-0.150', '-0.150', '0.150', '0.0', '0.0', '0.0',
-                       'base_link', 'bluerov2/dvl_imu'],
-            parameters=[{'use_sim_time': sim_time}]
-        ),
+        # Node(
+        #     package='tf2_ros',
+        #     executable='static_transform_publisher',
+        #     name='base_link_to_dvl',
+        #     arguments=['-0.150', '-0.150', '0.150', '0.0', '0.0', '0.0',
+        #                'base_link', dvl_link'],
+        #     parameters=[{'use_sim_time': sim_time}]
+        # ),
+        # Node(
+        #     package='tf2_ros',
+        #     executable='static_transform_publisher',
+        #     name='base_link_to_dvl_imu',
+        #     arguments=['-0.150', '-0.150', '0.150', '0.0', '0.0', '0.0',
+        #                'base_link', 'dvl_link'],
+        #     parameters=[{'use_sim_time': sim_time}]
+        # ),
 
         #### Map TF ####
         Node(

@@ -252,6 +252,9 @@ install(PROGRAMS ${PROJECT_NAME}/nucleus_imu_bridge.py
 install(PROGRAMS ${PROJECT_NAME}/camera_info_publisher.py
         DESTINATION lib/${PROJECT_NAME}
         RENAME camera_info_publisher)
+install(PROGRAMS ${PROJECT_NAME}/nucleus_ahrs_bridge.py
+        DESTINATION lib/${PROJECT_NAME}
+        RENAME nucleus_ahrs_bridge)
 # Install Shared Directories
 install(DIRECTORY launch config rviz description
   DESTINATION share/${PROJECT_NAME}
