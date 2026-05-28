@@ -13,6 +13,7 @@ def generate_launch_description():
     # --- Package paths ---
     sonar_pkg = get_package_share_directory('waterlinked_sonar_3d15')
     mavros_pkg = get_package_share_directory('sonar_localization')
+    pkg_share = get_package_share_directory('sonar_localization')
 
     sonar = LaunchConfiguration('sonar')
     dvl = LaunchConfiguration('dvl')
@@ -24,6 +25,23 @@ def generate_launch_description():
         ),
         condition=IfCondition(sonar)
     )
+
+    bridges = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(pkg_share, 'launch', 'sensors_bridge.launch.py')
+            ),
+            launch_arguments={
+                'dvl_type':       'nucleus',
+                'dvl_frame':      'dvl_link',
+                'depth_frame':    'icp_map',
+                'relative_depth': 'false',
+                'depth_topic':    '/global_position/rel_alt',
+                'ned':            'false',
+                'ahrs': 'false',
+            }.items(),
+        )
+
+    
 
     mavros_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -121,5 +139,6 @@ def generate_launch_description():
         base_link_to_camera,
         nucleus_node,
         connect_tcp,
-        nucleus_start,       
+        nucleus_start,  
+        bridges,     
     ])

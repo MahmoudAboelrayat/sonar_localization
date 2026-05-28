@@ -157,12 +157,26 @@ target_link_libraries(prior_map_publisher
   ${PCL_LIBRARIES}
 )
 
-
+# Node: localization_imu_pre (VGICP SLAM + IMU preintegration + DVL factor)
+add_executable(localization_imu_pre src/localization_imu_pre.cpp)
+ament_target_dependencies(localization_imu_pre
+  rclcpp sensor_msgs nav_msgs geometry_msgs
+  visualization_msgs pcl_conversions pcl_ros
+  fast_gicp GTSAM
+)
+target_include_directories(localization_imu_pre PUBLIC
+  ${GTSAM_INCLUDE_DIR}
+  ${PCL_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+)
+target_link_libraries(localization_imu_pre
+  ${PCL_LIBRARIES}
+  gtsam)
 # --- 4. Install Directives ---
 
 # Install C++ Executables
 install(TARGETS
-  #localization_imu_pre
+  localization_imu_pre
   loopclosure_vgicp
   loopclosure_samll_vgicp
   prior_map_localizer
@@ -255,6 +269,9 @@ install(PROGRAMS ${PROJECT_NAME}/camera_info_publisher.py
 install(PROGRAMS ${PROJECT_NAME}/nucleus_ahrs_bridge.py
         DESTINATION lib/${PROJECT_NAME}
         RENAME nucleus_ahrs_bridge)
+install(PROGRAMS ${PROJECT_NAME}/camera2point.py
+      DESTINATION lib/${PROJECT_NAME}
+      RENAME camera2point)       
 # Install Shared Directories
 install(DIRECTORY launch config rviz description
   DESTINATION share/${PROJECT_NAME}

@@ -28,7 +28,7 @@ public:
     GicpOdomNode() : Node("vgicp_odom_node")
     {
         std::string odom_pub_topic = this->declare_parameter<std::string>("topics.odom_pub", "vgicp_odom");
-        std::string pc_sub_topic   = this->declare_parameter<std::string>("topics.pc_sub", "/sonar/point_cloud_noisy");
+        std::string pc_sub_topic   = this->declare_parameter<std::string>("topics.pc_sub", "/sonar/point_cloud");
         std::string deadreckoining_sub  = this->declare_parameter<std::string>("topics.deadreckoining_sub", "/odometry/filtered");
         std::string map_pub_topic  = this->declare_parameter<std::string>("topics.map_pub", "vgicp_global_map");
 
@@ -48,7 +48,7 @@ public:
         double s2b_yaw   = this->declare_parameter<double>("tf.sonar2base_yaw", 0.0);
         
         odom_frame = this ->declare_parameter<std::string>("frames.odom_frame", "odom");
-        base_frame = this ->declare_parameter<std::string>("frames.base_frame", "sam_auv_v1/base_link");
+        base_frame = this ->declare_parameter<std::string>("frames.base_frame", "base_link");
 
 
         ekf_z = this->declare_parameter<bool>("ekf_z", false);
@@ -235,10 +235,10 @@ private:
     
     void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
     {   
-        if (!has_ekf_) {
-            RCLCPP_WARN_ONCE(this->get_logger(), "Waiting for first EKF message to anchor SLAM...");
-            return;
-        }
+        // if (!has_ekf_) {
+        //     RCLCPP_WARN_ONCE(this->get_logger(), "Waiting for first EKF message to anchor SLAM...");
+        //     return;
+        // }
 
         auto start_time = this->now();
 

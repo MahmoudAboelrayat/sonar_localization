@@ -10,7 +10,7 @@ class AHRSBridge(Node):
         super().__init__("ahrs_bridge")
         self.get_logger().info("AHRS bridge started")
 
-        self.declare_parameter('frame_id', 'bluerov2/dvl_imu')
+        self.declare_parameter('frame_id', 'dvl_link')
         self.frame_id = self.get_parameter('frame_id').get_parameter_value().string_value
         self.declare_parameter('ahrs_topic', '/nucleus_node/ahrs_packets')
         self.ahrs_topic = self.get_parameter('ahrs_topic').get_parameter_value().string_value

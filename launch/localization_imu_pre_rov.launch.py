@@ -27,19 +27,19 @@ def launch_setup(context, *args, **kwargs):
     return [
 
         #### Topics Bridges ####
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(pkg_share, 'launch', 'sensors_bridge.launch.py')
-            ),
-            launch_arguments={
-                'dvl_type':       dvl_type,
-                'dvl_frame':      'dvl_link',
-                'depth_frame':    'icp_map',
-                'relative_depth': 'false',
-                'depth_topic':    '/global_position/rel_alt',
-                'ned':            'false',
-            }.items(),
-        ),
+        # IncludeLaunchDescription(
+        #     PythonLaunchDescriptionSource(
+        #         os.path.join(pkg_share, 'launch', 'sensors_bridge.launch.py')
+        #     ),
+        #     launch_arguments={
+        #         'dvl_type':       dvl_type,
+        #         'dvl_frame':      'dvl_link',
+        #         'depth_frame':    'icp_map',
+        #         'relative_depth': 'false',
+        #         'depth_topic':    '/global_position/rel_alt',
+        #         'ned':            'false',
+        #     }.items(),
+        # ),
 
         #### EKF Nodes ####
         Node(

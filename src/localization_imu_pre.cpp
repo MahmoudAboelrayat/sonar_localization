@@ -11,6 +11,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/twist_with_covariance_stamped.hpp>
 #include <std_msgs/msg/header.hpp>
 
 #include <pcl_conversions/pcl_conversions.h>
@@ -39,6 +40,7 @@
 #include <gtsam/navigation/ImuFactor.h>
 #include <gtsam/navigation/ImuBias.h>
 #include <gtsam/navigation/PreintegrationParams.h>
+#include <gtsam/navigation/AttitudeFactor.h>
 
 #include <sensor_msgs/msg/imu.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
@@ -52,28 +54,30 @@ using gtsam::symbol_shorthand::B;
 // Constrains (Pose3, Vector3_world) using DVL velocity measured in body frame.
 class DvlFactor : public gtsam::NoiseModelFactor2<gtsam::Pose3, gtsam::Vector3>
 {
+    using Base = gtsam::NoiseModelFactor2<gtsam::Pose3, gtsam::Vector3>;
     gtsam::Vector3 dvl_vel_body_;
 public:
     DvlFactor(gtsam::Key pose_key, gtsam::Key vel_key,
               const gtsam::Vector3 & v_body,
               const gtsam::SharedNoiseModel & model)
-        : NoiseModelFactor2(model, pose_key, vel_key), dvl_vel_body_(v_body) {}
+        : Base(model, pose_key, vel_key), dvl_vel_body_(v_body) {}
 
     gtsam::Vector evaluateError(
         const gtsam::Pose3 & pose, const gtsam::Vector3 & vel_world,
-        boost::optional<gtsam::Matrix &> H1 = boost::none,
-        boost::optional<gtsam::Matrix &> H2 = boost::none) const override
+        gtsam::OptionalMatrixType H1 = nullptr,
+        gtsam::OptionalMatrixType H2 = nullptr) const override
     {
         gtsam::Matrix3 R = pose.rotation().matrix();
         gtsam::Vector3 vel_body = R.transpose() * vel_world;
 
-        if (H2) *H2 = -R.transpose();
+        if (H2) *H2 = R.transpose();
         if (H1) {
-            // d(R^T * v_world)/d(rotation perturbation) = skew(R^T * v_world)
+            // d(R^T * v_world)/d(δω) under right-perturbation R·Exp(δω) = +skew(vel_body)
+            // skew(v) = [[0,-v2,v1],[v2,0,-v0],[-v1,v0,0]]
             gtsam::Matrix36 J = gtsam::Matrix36::Zero();
-            J.leftCols(3) << 0, vel_body(2), -vel_body(1),
-                             -vel_body(2), 0,  vel_body(0),
-                              vel_body(1), -vel_body(0), 0;
+            J.leftCols(3) <<  0.0,           -vel_body(2),  vel_body(1),
+                               vel_body(2),   0.0,          -vel_body(0),
+                              -vel_body(1),   vel_body(0),   0.0;
             *H1 = J;
         }
         return vel_body - dvl_vel_body_;
@@ -98,7 +102,7 @@ public:
         std::string deadreckoning_sub = this->declare_parameter<std::string>("topics.deadreckoining_sub", "/odometry/filtered");
         std::string map_pub_topic     = this->declare_parameter<std::string>("topics.map_pub",            "vgicp_global_map");
 
-        double map_res        = this->declare_parameter<double>("tuning.map_res",          0.1);
+        map_res_              = this->declare_parameter<double>("tuning.map_res",          0.1);
         int    vgicp_threads  = this->declare_parameter<int>   ("tuning.vgicp_threads",    4);
         double vgicp_epsilon  = this->declare_parameter<double>("tuning.vgicp_epsilon",    1e-4);
         double vgicp_max_dist = this->declare_parameter<double>("tuning.vgicp_max_dist",   1.5);
@@ -112,6 +116,7 @@ public:
         double lc_vgicp_max_dist = this->declare_parameter<double>("loop_closure.vgicp_max_dist",   1.5);
         int    lc_vgicp_max_iter = this->declare_parameter<int>   ("loop_closure.vgicp_max_iter",   100);
         double lc_vgicp_res      = this->declare_parameter<double>("loop_closure.vgicp_resolution", 0.25);
+        use_lc_ = this->declare_parameter<bool>("loop_closure.use_lc", true);
 
         lc_use_ndt_      = this->declare_parameter<bool>  ("loop_closure.use_ndt",         false);
         double lc_ndt_res  = this->declare_parameter<double>("loop_closure.ndt_resolution",  2.0);
@@ -185,6 +190,15 @@ public:
             "IMU->Base extrinsics: rpy=[%.1f, %.1f, %.1f] deg",
             i2b_roll, i2b_pitch, i2b_yaw);
 
+        // DVL lever arm — translation from base_link to dvl_link in body frame
+        // Used to remove the ω×r velocity component from DVL readings
+        r_base2dvl_.x() = this->declare_parameter<double>("tf.dvl2base_x", 0.0);
+        r_base2dvl_.y() = this->declare_parameter<double>("tf.dvl2base_y", 0.0);
+        r_base2dvl_.z() = this->declare_parameter<double>("tf.dvl2base_z", 0.0);
+        RCLCPP_INFO(get_logger(),
+            "DVL lever arm (base->dvl): [%.3f, %.3f, %.3f] m",
+            r_base2dvl_.x(), r_base2dvl_.y(), r_base2dvl_.z());
+
         // --- Publishers ---
         odom_pub_       = this->create_publisher<nav_msgs::msg::Odometry>       (odom_pub_topic,    10);
         global_map_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2> (map_pub_topic,      1);
@@ -222,7 +236,7 @@ public:
         prev_ekf_pose_   = Eigen::Matrix4f::Identity();
 
         local_map_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
-        map_filter_.setLeafSize(map_res, map_res, map_res);
+        map_filter_.setLeafSize(map_res_, map_res_, map_res_);
 
         // VGICP — odometry (scan-to-local-map)
         vgicp_.setNumThreads(vgicp_threads);
@@ -280,12 +294,20 @@ public:
 
         // IMU parameters
         std::string imu_topic = this->declare_parameter<std::string>("topics.imu_sub", "/imu/data");
-        imu_accel_noise_  = this->declare_parameter<double>("imu.accel_noise",       0.01);
-        imu_gyro_noise_   = this->declare_parameter<double>("imu.gyro_noise",        0.001);
-        imu_accel_bias_   = this->declare_parameter<double>("imu.accel_bias_noise",  1e-4);
-        imu_gyro_bias_    = this->declare_parameter<double>("imu.gyro_bias_noise",   1e-5);
+        imu_accel_noise_  = this->declare_parameter<double>("imu.accel_noise",       0.05);
+        imu_gyro_noise_   = this->declare_parameter<double>("imu.gyro_noise",        0.005);
+        imu_accel_bias_   = this->declare_parameter<double>("imu.accel_bias_noise",  1e-3);
+        imu_gyro_bias_    = this->declare_parameter<double>("imu.gyro_bias_noise",   1e-3);
         imu_gravity_      = this->declare_parameter<double>("imu.gravity",           9.81);
         use_imu_          = this->declare_parameter<bool>  ("imu.use_imu",           false);
+        imu_start_kf_     = this->declare_parameter<int>   ("imu.start_kf",          0);
+        // Static bias offsets — measure by echoing IMU at rest; subtracted per-sample
+        imu_accel_bias_x_ = this->declare_parameter<double>("imu.static_accel_bias_x", 0.0);
+        imu_accel_bias_y_ = this->declare_parameter<double>("imu.static_accel_bias_y", 0.0);
+        imu_accel_bias_z_ = this->declare_parameter<double>("imu.static_accel_bias_z", 0.0);
+        imu_gyro_bias_x_  = this->declare_parameter<double>("imu.static_gyro_bias_x",  0.0);
+        imu_gyro_bias_y_  = this->declare_parameter<double>("imu.static_gyro_bias_y",  0.0);
+        imu_gyro_bias_z_  = this->declare_parameter<double>("imu.static_gyro_bias_z",  0.0);
 
         // DVL parameters
         std::string dvl_topic = this->declare_parameter<std::string>("topics.dvl_sub", "/dvl/odometry");
@@ -294,11 +316,18 @@ public:
         dvl_noise_z_  = this->declare_parameter<double>("dvl.noise_z",  0.05);
         use_dvl_      = this->declare_parameter<bool>  ("dvl.use_dvl",  false);
 
+        // AHRS attitude parameters
+        use_ahrs_       = this->declare_parameter<bool>  ("ahrs.use_ahrs",    false);
+        ahrs_noise_rp_  = this->declare_parameter<double>("ahrs.noise_rp",    0.02); // ~1°
+        ahrs_noise_yaw_ = this->declare_parameter<double>("ahrs.noise_yaw",   0.1);  // ~6°
+
         initGTSAM();
 
         // IMU preintegration setup
         if (use_imu_) {
-            auto imu_p = gtsam::PreintegrationParams::MakeSharedU(imu_gravity_);
+            // MakeSharedD = Z-down world frame: gravity = (0,0,+g) in world.
+            // Correct for this sensor: a_z ≈ -9.83 at rest → Z axis points DOWN.
+            auto imu_p = gtsam::PreintegrationParams::MakeSharedD(imu_gravity_);
             imu_p->accelerometerCovariance = gtsam::I_3x3 * imu_accel_noise_ * imu_accel_noise_;
             imu_p->gyroscopeCovariance     = gtsam::I_3x3 * imu_gyro_noise_  * imu_gyro_noise_;
             imu_p->integrationCovariance   = gtsam::I_3x3 * 1e-6;
@@ -318,11 +347,26 @@ public:
             auto dvl_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
             rclcpp::SubscriptionOptions dvl_sub_opt;
             dvl_sub_opt.callback_group = dvl_cb_group;
-            dvl_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+            dvl_sub_ = this->create_subscription<geometry_msgs::msg::TwistWithCovarianceStamped>(
                 dvl_topic, 50,
                 std::bind(&GicpOdomNode::dvlCallback, this, std::placeholders::_1),
                 dvl_sub_opt);
             RCLCPP_INFO(get_logger(), "DVL velocity factor enabled on %s", dvl_topic.c_str());
+        }
+
+        std::string ahrs_topic = this->declare_parameter<std::string>("topics.ahrs_sub", "/dvl/ahrs_imu");
+        ahrs_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
+            ahrs_topic, 50,
+            [this](const sensor_msgs::msg::Imu::SharedPtr msg) {
+                gtsam::Rot3 R = gtsam::Rot3::Quaternion(
+                    msg->orientation.w, msg->orientation.x,
+                    msg->orientation.y, msg->orientation.z);
+                std::lock_guard<std::mutex> lk(ahrs_mutex_);
+                latest_ahrs_rot_ = R;
+                has_ahrs_ = true;
+            });
+        if (use_ahrs_) {
+            RCLCPP_INFO(get_logger(), "AHRS attitude factor enabled on %s", ahrs_topic.c_str());
         }
 
         RCLCPP_INFO(get_logger(), "VGICP SLAM Node initialised.");
@@ -369,13 +413,20 @@ private:
                                  imu_gyro_bias_,  imu_gyro_bias_,  imu_gyro_bias_).finished());
 
         // Prior on velocity and bias at bootstrap
-        velocityPriorNoise_ = gtsam::noiseModel::Isotropic::Sigma(3, 0.1);
-        biasPriorNoise_     = gtsam::noiseModel::Diagonal::Sigmas(
+        velocityPriorNoise_   = gtsam::noiseModel::Isotropic::Sigma(3, 0.1);
+        // Fallback velocity random walk — used when IMU factor is unavailable
+        // Sigma = 0.5 m/s per keyframe; loosen if vehicle accelerates quickly
+        velocityBetweenNoise_ = gtsam::noiseModel::Isotropic::Sigma(3, 0.5);
+        biasPriorNoise_       = gtsam::noiseModel::Diagonal::Sigmas(
             (gtsam::Vector(6) << 0.1, 0.1, 0.1, 0.01, 0.01, 0.01).finished());
 
         // DVL velocity measurement noise
         dvlNoise_ = gtsam::noiseModel::Diagonal::Sigmas(
             (gtsam::Vector(3) << dvl_noise_x_, dvl_noise_y_, dvl_noise_z_).finished());
+
+        // AHRS attitude noise — 2D (on Unit3 tangent space), constrains roll+pitch only
+        // AttitudeFactor leaves yaw free; GICP handles yaw via scan matching
+        ahrsNoise_ = gtsam::noiseModel::Isotropic::Sigma(2, ahrs_noise_rp_);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -419,6 +470,33 @@ private:
         gtsam::Pose3 current_gtsam_pose = matrix2Pose3(current_pose);
 
         if (current_id == 0) {
+            // ── Bootstrap: seed initial orientation from AHRS if available ────
+            // This ensures IMU gravity is resolved onto the correct axes from
+            // frame 1, preventing gravity leaking into horizontal position drift.
+            if (use_imu_) {
+                gtsam::Rot3 ahrs_init;
+                bool got_ahrs = false;
+                {
+                    std::lock_guard<std::mutex> lk(ahrs_mutex_);
+                    if (has_ahrs_) { ahrs_init = latest_ahrs_rot_; got_ahrs = true; }
+                }
+                if (got_ahrs) {
+                    // Keep AHRS roll+pitch; yaw comes from GICP (starts at 0)
+                    double r = ahrs_init.roll();
+                    // double p = ahrs_init.pitch();
+                    double p = 0.0;
+                    double y = current_gtsam_pose.rotation().yaw();
+                    gtsam::Rot3 init_rot = gtsam::Rot3::RzRyRx(r, p, y);
+                    current_gtsam_pose = gtsam::Pose3(init_rot, current_gtsam_pose.translation());
+                    RCLCPP_INFO(get_logger(),
+                        "[Bootstrap] AHRS seed: roll=%.2f°  pitch=%.2f°  yaw=%.2f°",
+                        r * 180.0 / M_PI, p * 180.0 / M_PI, y * 180.0 / M_PI);
+                } else {
+                    RCLCPP_WARN(get_logger(),
+                        "[Bootstrap] No AHRS data yet — X(0) starts with identity roll/pitch. ");
+                }
+            }
+
             // ── Bootstrap: priors on pose, velocity, bias ─────────────────────
             gtSAMgraph_.add(gtsam::PriorFactor<gtsam::Pose3>(
                 X(0), current_gtsam_pose, priorNoise_));
@@ -444,7 +522,7 @@ private:
             }
         } else {
             bool used_imu_factor = false;
-            if (use_imu_ && preint_) {
+            if (use_imu_ && preint_ && current_id >= imu_start_kf_) {
                 std::lock_guard<std::mutex> ilk(imu_mutex_);
                 if (preint_->deltaTij() > 0.01) {
                     // IMU factor replaces the pose BetweenFactor
@@ -452,8 +530,21 @@ private:
                         X(current_id-1), V(current_id-1),
                         X(current_id),   V(current_id),
                         B(current_id-1), *preint_));
+                    gtsam::Vector3 dv = preint_->deltaVij();
+                    gtsam::Vector3 v_init = prev_velocity_ + dv;
+                    RCLCPP_INFO(get_logger(),
+                        "[IMU factor] kf=%d  dt=%.3fs  "
+                        "deltaV=[%.4f, %.4f, %.4f]  "
+                        "V_seed=[%.4f, %.4f, %.4f]  m/s",
+                        current_id, preint_->deltaTij(),
+                        dv.x(), dv.y(), dv.z(),
+                        v_init.x(), v_init.y(), v_init.z());
                     used_imu_factor = true;
                 }
+            } else if (use_imu_ && current_id < imu_start_kf_) {
+                RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
+                    "[IMU warmup] kf=%d/%d — using GICP odometry until pose is reliable",
+                    current_id, imu_start_kf_);
             }
             if (!used_imu_factor) {
                 // fall back to pose-only odometry factor
@@ -461,6 +552,14 @@ private:
                 gtsam::Pose3 relative   = prev_gtsam.between(current_gtsam_pose);
                 gtSAMgraph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
                     X(current_id-1), X(current_id), relative, odomNoise_));
+
+                // Velocity random walk: V(k) is otherwise unconstrained when the
+                // IMU factor is absent. Without this, the linear system is singular.
+                if (use_imu_ || use_dvl_) {
+                    gtSAMgraph_.add(gtsam::BetweenFactor<gtsam::Vector3>(
+                        V(current_id-1), V(current_id),
+                        gtsam::Vector3::Zero(), velocityBetweenNoise_));
+                }
             }
 
             if (use_imu_ || use_dvl_) {
@@ -483,8 +582,37 @@ private:
                     std::lock_guard<std::mutex> dlk(dvl_mutex_);
                     if (has_dvl_) { dvl_snap = latest_dvl_vel_body_; dvl_ok = true; }
                 }
-                if (dvl_ok)
+                if (dvl_ok) {
                     gtSAMgraph_.add(DvlFactor(X(current_id), V(current_id), dvl_snap, dvlNoise_));
+                    RCLCPP_INFO(get_logger(),
+                        "[DVL factor] kf=%d  body-vel added to graph  x=%.4f  y=%.4f  z=%.4f  m/s",
+                        current_id, dvl_snap.x(), dvl_snap.y(), dvl_snap.z());
+                } else {
+                    RCLCPP_WARN(get_logger(),
+                        "[DVL factor] kf=%d  skipped — no DVL measurement received yet", current_id);
+                }
+            }
+
+            // AHRS attitude factor — constrains roll+pitch only (2 DoF via gravity direction)
+            // Prevents gyro-bias-induced tilt from leaking gravity onto horizontal axes
+            if (use_ahrs_) {
+                gtsam::Rot3 ahrs_snap;
+                bool ahrs_ok = false;
+                {
+                    std::lock_guard<std::mutex> lk(ahrs_mutex_);
+                    if (has_ahrs_) { ahrs_snap = latest_ahrs_rot_; ahrs_ok = true; }
+                }
+                if (ahrs_ok) {
+                    // Constraint: R_wb * bMeasured == nRef
+                    // nRef    = gravity direction in world   = (0,0,1) for Z-down
+                    // bMeasured = gravity direction in body  = R_wb^T * (0,0,1)
+                    gtsam::Unit3 g_body(ahrs_snap.transpose() * gtsam::Vector3(0, 0, 1));
+                    gtSAMgraph_.add(gtsam::AttitudeFactor<gtsam::Pose3>(
+                        X(current_id),
+                        gtsam::Unit3(0, 0, 1),  // nRef  — gravity in world (Z-down)
+                        ahrsNoise_,              // noise model
+                        g_body));                // bMeasured — gravity in body frame
+                }
             }
         }
         isam_->update(gtSAMgraph_, initialEstimates_);
@@ -554,7 +682,7 @@ private:
     // ── Loop closure thread ───────────────────────────────────────────────────
     void loopClosureThread()
     {
-        while (rclcpp::ok()) {
+        while (rclcpp::ok() && use_lc_) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
             performLoopClosure();
         }
@@ -616,7 +744,7 @@ private:
         // ── 2. Downsample history submap ──────────────────────────────────────
         pcl::PointCloud<pcl::PointXYZ>::Ptr history_ds(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::VoxelGrid<pcl::PointXYZ> ds_filter;
-        ds_filter.setLeafSize(0.2f, 0.2f, 0.2f);
+        ds_filter.setLeafSize(map_res_, map_res_, map_res_);
         ds_filter.setInputCloud(history_cloud_world);
         ds_filter.filter(*history_ds);
 
@@ -755,7 +883,8 @@ private:
 
         pcl::PointCloud<pcl::PointXYZ>::Ptr downsampled(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::VoxelGrid<pcl::PointXYZ> vg;
-        vg.setLeafSize(0.2f, 0.2f, 0.2f);
+        // vg.setLeafSize(0.2f, 0.2f, 0.2f);
+        vg.setLeafSize(map_res_, map_res_, map_res_);
         vg.setInputCloud(full_map.makeShared());
         vg.filter(*downsampled);
 
@@ -811,24 +940,46 @@ private:
         double dt = t - imu_last_time_;
         if (dt <= 0.0 || dt > 0.5) { imu_last_time_ = t; return; }
 
+        // Subtract static biases measured at rest so the preintegrator is accurate
+        // from keyframe 0. GTSAM's bias state corrects any remaining residual.
         gtsam::Vector3 accel = R_imu2base_ * gtsam::Vector3(
-            msg->linear_acceleration.x,
-            msg->linear_acceleration.y,
-            msg->linear_acceleration.z);
+            msg->linear_acceleration.x - imu_accel_bias_x_,
+            msg->linear_acceleration.y - imu_accel_bias_y_,
+            msg->linear_acceleration.z - imu_accel_bias_z_);
         gtsam::Vector3 gyro = R_imu2base_ * gtsam::Vector3(
-            msg->angular_velocity.x,
-            msg->angular_velocity.y,
-            msg->angular_velocity.z);
+            msg->angular_velocity.x - imu_gyro_bias_x_,
+            msg->angular_velocity.y - imu_gyro_bias_y_,
+            msg->angular_velocity.z - imu_gyro_bias_z_);
         preint_->integrateMeasurement(accel, gyro, dt);
         imu_last_time_ = t;
     }
 
     // ── DVL callback — latches latest body-frame velocity ────────────────────
-    void dvlCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
+    void dvlCallback(const geometry_msgs::msg::TwistWithCovarianceStamped::SharedPtr msg)
     {
         gtsam::Vector3 vel(msg->twist.twist.linear.x,
-                            msg->twist.twist.linear.y,
-                            msg->twist.twist.linear.z);
+                           msg->twist.twist.linear.y,
+                           msg->twist.twist.linear.z);
+
+        // Lever arm correction: v_base = v_dvl - ω × r_base2dvl
+        // The DVL measures velocity at dvl_link; GTSAM tracks base_link.
+        // When rotating, the two differ by ω × r.
+        if (r_base2dvl_.norm() > 1e-6) {
+            gtsam::Vector3 omega(msg->twist.twist.angular.x,
+                                 msg->twist.twist.angular.y,
+                                 msg->twist.twist.angular.z);
+            gtsam::Vector3 lever_vel = omega.cross(r_base2dvl_);
+            RCLCPP_DEBUG(get_logger(),
+                "[DVL lever] omega=[%.4f,%.4f,%.4f] r=[%.3f,%.3f,%.3f] correction=[%.4f,%.4f,%.4f]",
+                omega.x(), omega.y(), omega.z(),
+                r_base2dvl_.x(), r_base2dvl_.y(), r_base2dvl_.z(),
+                lever_vel.x(), lever_vel.y(), lever_vel.z());
+            vel -= lever_vel;
+        }
+
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+            "[DVL cb] body-frame vel (corrected)  x=%.4f  y=%.4f  z=%.4f  m/s",
+            vel.x(), vel.y(), vel.z());
         std::lock_guard<std::mutex> lk(dvl_mutex_);
         latest_dvl_vel_body_ = vel;
         has_dvl_ = true;
@@ -1007,6 +1158,7 @@ private:
             prev_ekf_pose_ = current_ekf_pose;
 
         } else {
+            RCLCPP_WARN(get_logger(), "Trusting the ekf for frame %d",lost_frames_);
             if (lost_frames_ < max_lost_frames) {
                 ++lost_frames_;
                 std::lock_guard<std::mutex> pose_lock(pose_mutex_);
@@ -1195,17 +1347,20 @@ private:
     // ── Extrinsics ────────────────────────────────────────────────────────────
     Eigen::Matrix4f  sonar2base_, base2sonar_, ned_transform_;
     Eigen::Matrix3d  R_imu2base_;
+    gtsam::Vector3   r_base2dvl_{gtsam::Vector3::Zero()};  // base_link → dvl_link in body frame [m]
 
     // ── Config ────────────────────────────────────────────────────────────────
     std::string odom_frame_, base_frame_;
     bool        is_ned_{false};
 
     int    submap_size_{20};
+    double map_res_{0.1};
     double kf_dist_thresh_{0.5}, kf_angle_thresh_{10.0};
 
     double lc_search_radius_{10.0}, lc_fitness_score_{0.3};
     int    lc_history_gap_{10}, lc_submap_size_{7};
     bool   lc_use_ndt_{false};
+    bool use_lc_{true};
 
     // GICP sanity check thresholds
     double gicp_max_correction_dist_{1.0};   // meters
@@ -1231,6 +1386,7 @@ private:
 
     // ── IMU / DVL ─────────────────────────────────────────────────────────────
     bool   use_imu_{false}, use_dvl_{false};
+    int    imu_start_kf_{0};   // keyframes to wait before activating ImuFactor
 
     // IMU preintegration
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
@@ -1240,7 +1396,7 @@ private:
     bool   has_imu_first_{false};
 
     // DVL velocity latch
-    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr dvl_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::TwistWithCovarianceStamped>::SharedPtr dvl_sub_;
     std::mutex     dvl_mutex_;
     gtsam::Vector3 latest_dvl_vel_body_{gtsam::Vector3::Zero()};
     bool           has_dvl_{false};
@@ -1249,16 +1405,30 @@ private:
     gtsam::Vector3                  prev_velocity_{gtsam::Vector3::Zero()};
     gtsam::imuBias::ConstantBias    prev_bias_;
 
-    // Noise models for IMU / DVL
-    gtsam::noiseModel::Diagonal::shared_ptr biasBetweenNoise_;
+    // Noise models for IMU / DVL / AHRS
+    gtsam::noiseModel::Diagonal::shared_ptr  biasBetweenNoise_;
     gtsam::noiseModel::Isotropic::shared_ptr velocityPriorNoise_;
-    gtsam::noiseModel::Diagonal::shared_ptr biasPriorNoise_;
-    gtsam::noiseModel::Diagonal::shared_ptr dvlNoise_;
+    gtsam::noiseModel::Isotropic::shared_ptr velocityBetweenNoise_;
+    gtsam::noiseModel::Diagonal::shared_ptr  biasPriorNoise_;
+    gtsam::noiseModel::Diagonal::shared_ptr  dvlNoise_;
+    gtsam::noiseModel::Isotropic::shared_ptr ahrsNoise_;  // 2D — roll+pitch only
+
+    // ── AHRS attitude ─────────────────────────────────────────────────────────
+    bool   use_ahrs_{false};
+    bool   has_ahrs_{false};
+    std::mutex ahrs_mutex_;
+    gtsam::Rot3 latest_ahrs_rot_;
+    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr ahrs_sub_;
+    double ahrs_noise_rp_{0.02};   // ~1° sigma for roll and pitch
+    double ahrs_noise_yaw_{0.1};   // kept for future full-orientation use
 
     // IMU noise parameters (needed in initGTSAM which can run after constructor)
-    double imu_accel_noise_{0.01}, imu_gyro_noise_{0.001};
-    double imu_accel_bias_{1e-4},  imu_gyro_bias_{1e-5};
+    double imu_accel_noise_{0.05},  imu_gyro_noise_{0.005};
+    double imu_accel_bias_{1e-3},   imu_gyro_bias_{1e-3};
     double imu_gravity_{9.81};
+    // Static bias offsets subtracted per-sample before GTSAM bias estimation kicks in
+    double imu_accel_bias_x_{0.0},  imu_accel_bias_y_{0.0},  imu_accel_bias_z_{0.0};
+    double imu_gyro_bias_x_{0.0},   imu_gyro_bias_y_{0.0},   imu_gyro_bias_z_{0.0};
 
     // DVL noise parameters
     double dvl_noise_x_{0.05}, dvl_noise_y_{0.05}, dvl_noise_z_{0.05};

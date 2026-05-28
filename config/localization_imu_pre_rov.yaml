@@ -12,14 +12,15 @@ localization_imu_pre:
       map_pub: "vgicp_global_map"
       imu_sub: "/dvl/imu"
       dvl_sub: "/dvl/velocity"
+      ahrs_sub: "/dvl/ahrs_imu"
 
     tuning:
-      map_res: 0.1
+      map_res: 0.05
       vgicp_threads: 8
       vgicp_epsilon: 1e-4
-      vgicp_max_dist: 1.5
+      vgicp_max_dist: 1.0
       vgicp_max_iter: 100
-      vgicp_resolution: 0.1
+      vgicp_resolution: 0.05
       max_lost_frames: 40
 
     radius_outlier_removal:
@@ -53,20 +54,28 @@ localization_imu_pre:
       imu2base_y: 0.0
       imu2base_z: 0.0
 
+      # DVL lever arm — translation from base_link to dvl_link in body frame
+      # Used to remove the ω×r velocity component from DVL readings.
+      # Set to (0,0,0) to disable correction.
+      dvl2base_x: 0.0          # meters
+      dvl2base_y: 0.107
+      dvl2base_z: -0.265
+
     keyframe:
       submap_size: 30
-      dist_thresh: 0.5
-      angle_thresh: 5.0        # degrees
+      dist_thresh: 0.3
+      angle_thresh: 3.0        # degrees
 
     loop_closure:
-      search_radius: 15.0
+      use_lc: false
+      search_radius: 4.0
       fitness_score: 0.2
       history_gap: 20
       submap_size: 10
       vgicp_epsilon: 1e-4
-      vgicp_max_dist: 4.0
+      vgicp_max_dist: 1.0
       vgicp_max_iter: 100
-      vgicp_resolution: 0.3
+      vgicp_resolution: 0.05
       use_ndt: false
       ndt_resolution: 1.0
       ndt_step_size: 1.0
@@ -83,16 +92,29 @@ localization_imu_pre:
 
     imu:
       use_imu: false            # set true to enable IMU preintegration
-      accel_noise: 0.01         # accelerometer white noise [m/s^2]
-      gyro_noise: 0.001         # gyroscope white noise [rad/s]
-      accel_bias_noise: 1.0e-4  # accelerometer bias random walk
-      gyro_bias_noise: 1.0e-5   # gyroscope bias random walk
-      gravity: -9.89
+      start_kf: 10              # keyframes to wait before activating ImuFactor (GICP warms up first)
+      accel_noise: 0.5         # accelerometer white noise [m/s^2/sqrt(Hz)]
+      gyro_noise:  0.005        # gyroscope white noise [rad/s/sqrt(Hz)]
+      accel_bias_noise: 1.0e-3  # accelerometer bias random walk (loosened for faster convergence)
+      gyro_bias_noise:  1.0e-3  # gyroscope bias random walk (loosened for faster convergence)
+      gravity: 9.81
+     
+      static_accel_bias_x:  -0.02  # m/s^2 — measured resting a_x
+      static_accel_bias_y:  0.0   # m/s^2 — measured resting a_y (primary Y drift source)
+      static_accel_bias_z:  0.0    # m/s^2 — Z is dominated by gravity, leave to GTSAM
+      static_gyro_bias_x:   0.0    # rad/s
+      static_gyro_bias_y:   0.0    # rad/s
+      static_gyro_bias_z:   0.00 # rad/s — measured resting omega_z (primary rotation drift)
+
+    ahrs:
+      use_ahrs: false           # set true to enable AHRS roll+pitch factor
+      noise_rp:  0.001          # sigma [rad] for roll and pitch (~1°)
+      noise_yaw: 0.1            # sigma [rad] for yaw (~6°) — reserved for future use
 
     dvl:
-      use_dvl: false            # set true to enable DVL velocity factor
-      noise_x: 0.05             # [m/s]
-      noise_y: 0.05
+      use_dvl: true            # set true to enable DVL velocity factor
+      noise_x: 0.001             # [m/s]
+      noise_y: 0.001
       noise_z: 0.05
 
     frames:

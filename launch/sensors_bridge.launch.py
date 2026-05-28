@@ -17,6 +17,8 @@ def launch_setup(context, *args, **kwargs):
     depth_frame = LaunchConfiguration('depth_frame').perform(context)
     relative_depth = LaunchConfiguration('relative_depth').perform(context).lower() in ('true', '1', 'yes')
     ned = LaunchConfiguration('ned').perform(context).lower() in ('true', '1', 'yes')
+    ahrs = LaunchConfiguration('ahrs').perform(context).lower() in ('true', '1', 'yes')
+
 
     if dvl_type == 'nucleus':
         dvl_ex = 'nucleus_dvl_bridge'
@@ -62,6 +64,14 @@ def launch_setup(context, *args, **kwargs):
             condition=IfCondition(PythonExpression(["'", dvl_type, "' == 'nucleus'"])),
         ),
 
+        Node(
+         package='sonar_localization',
+            executable='nucleus_ahrs_bridge',
+            name='nucleus_ahrs_bridge',
+            output='screen',
+            condition=IfCondition(PythonExpression(["'", dvl_type, "' == 'nucleus' and ", str(ahrs)])),
+        ),
+
     ]
 
 
@@ -87,6 +97,8 @@ def generate_launch_description():
         DeclareLaunchArgument('ned', default_value='True',
                                     description='is depth reading ned frame'),
 
+        DeclareLaunchArgument('ahrs', default_value='False',
+                                    description='is depth reading ned frame'),
 
 
         OpaqueFunction(function=launch_setup),
