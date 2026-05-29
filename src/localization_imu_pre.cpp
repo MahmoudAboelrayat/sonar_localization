@@ -483,9 +483,9 @@ private:
                 if (got_ahrs) {
                     // Keep AHRS roll+pitch; yaw comes from GICP (starts at 0)
                     double r = ahrs_init.roll();
-                    // double p = ahrs_init.pitch();
-                    double p = 0.0;
+                    double p = ahrs_init.pitch();
                     double y = current_gtsam_pose.rotation().yaw();
+                    double y = 0.0;
                     gtsam::Rot3 init_rot = gtsam::Rot3::RzRyRx(r, p, y);
                     current_gtsam_pose = gtsam::Pose3(init_rot, current_gtsam_pose.translation());
                     RCLCPP_INFO(get_logger(),
