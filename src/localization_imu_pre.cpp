@@ -11,6 +11,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/twist_with_covariance_stamped.hpp>
 #include <std_msgs/msg/header.hpp>
 
@@ -516,9 +517,9 @@ public:
         if (use_depth_) {
             std::string depth_topic = this->declare_parameter<std::string>(
                 "topics.depth_sub", "/depth_odom");
-            depth_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+            depth_sub_ = this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
                 depth_topic, 50,
-                [this](const nav_msgs::msg::Odometry::SharedPtr msg) {
+                [this](const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg) {
                     std::lock_guard<std::mutex> lk(depth_mutex_);
                     latest_depth_z_ = msg->pose.pose.position.z;
                     has_depth_ = true;
@@ -1722,7 +1723,7 @@ private:
     bool   has_depth_{false};
     double latest_depth_z_{0.0};
     std::mutex depth_mutex_;
-    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr depth_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr depth_sub_;
     gtsam::noiseModel::Isotropic::shared_ptr depthNoise_;
 
     // ── AHRS attitude ─────────────────────────────────────────────────────────
