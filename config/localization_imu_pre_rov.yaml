@@ -1,8 +1,8 @@
 localization_imu_pre:
   ros__parameters:
     is_ned: false
-    ekf_z: true
-    loop_ekf_z: true
+    ekf_z: false
+    loop_ekf_z: false
     ekf_max_age: 0.1
 
     topics:
@@ -13,6 +13,7 @@ localization_imu_pre:
       imu_sub: "/dvl/imu"
       dvl_sub: "/dvl/velocity"
       ahrs_sub: "/dvl/ahrs_imu"
+      depth_sub: "/depth_odom"
 
     tuning:
       map_res: 0.05
@@ -38,12 +39,12 @@ localization_imu_pre:
       min_intensity: 0.005
 
     tf:
-      sonar2base_x: -0.109
-      sonar2base_y: -0.037
-      sonar2base_z: 0.168
-      sonar2base_roll: 0.0
-      sonar2base_pitch: 22.5   # degrees (- down / + up)
-      sonar2base_yaw: 0.0
+      base2sonar_x: 0.163
+      base2sonar_y: 0.1437
+      base2sonar_z: -0.3794
+      base2sonar_roll: 0.0
+      base2sonar_pitch: -22.5   # degrees (- down / + up)
+      base2sonar_yaw: 0.0
 
       # IMU mounting — rotation from IMU frame to base_link
       imu2base_roll:  0.0      # degrees
@@ -58,8 +59,8 @@ localization_imu_pre:
       # Used to remove the ω×r velocity component from DVL readings.
       # Set to (0,0,0) to disable correction.
       dvl2base_x: 0.0          # meters
-      dvl2base_y: 0.107
-      dvl2base_z: -0.265
+      dvl2base_y: 0.0
+      dvl2base_z: 0.0
 
     keyframe:
       submap_size: 30
@@ -83,17 +84,17 @@ localization_imu_pre:
       ndt_epsilon: 0.01
 
     gtsam:
-      odom_noise_x: 0.1
-      odom_noise_y: 0.1
+      odom_noise_x: 0.01
+      odom_noise_y: 0.01
       odom_noise_z: 0.001
       odom_noise_roll: 0.001
       odom_noise_pitch: 0.001
       odom_noise_yaw: 0.0125
 
     imu:
-      use_imu: true            # set true to enable IMU preintegration
+      use_imu: false            # set true to enable IMU preintegration
       start_kf: 20              # keyframes to wait before activating ImuFactor (GICP warms up first)
-      accel_noise: 0.5         # accelerometer white noise [m/s^2/sqrt(Hz)]
+      accel_noise: 0.01         # accelerometer white noise [m/s^2/sqrt(Hz)]
       gyro_noise:  0.005        # gyroscope white noise [rad/s/sqrt(Hz)]
       accel_bias_noise: 1.0e-3  # accelerometer bias random walk (loosened for faster convergence)
       gyro_bias_noise:  1.0e-3  # gyroscope bias random walk (loosened for faster convergence)
@@ -111,12 +112,19 @@ localization_imu_pre:
       noise_rp:  0.001          # sigma [rad] for roll and pitch (~1°)
       noise_yaw: 0.1            # sigma [rad] for yaw (~6°) — reserved for future use
 
+    depth:
+      use_depth: true          # set true to enable depth factor from depth_odom topic
+      noise: 0.05              # sigma [m] — typical pressure sensor ±5 cm
+
     dvl:
       use_dvl: true            # set true to enable DVL velocity factor
       noise_x: 0.001             # [m/s]
       noise_y: 0.001
       noise_z: 0.05
+      trans_noise_x: 0.01          
+      trans_noise_y: 0.01
+      trans_noise_z: 0.5
 
     frames:
       odom_frame: "icp_map"
-      base_frame: "saabmarine/base_link"
+      base_frame: "dvl_link"

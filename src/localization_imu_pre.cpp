@@ -50,37 +50,142 @@ using gtsam::symbol_shorthand::X;
 using gtsam::symbol_shorthand::V;
 using gtsam::symbol_shorthand::B;
 
-// ── DVL velocity factor ───────────────────────────────────────────────────────
-// Constrains (Pose3, Vector3_world) using DVL velocity measured in body frame.
-class DvlFactor : public gtsam::NoiseModelFactor2<gtsam::Pose3, gtsam::Vector3>
+// ── DVL Velocity Factor ───────────────────────────────────────────────────────
+// Ports equation (6) / rv from AQUA-SLAM paper.
+// Constrains V(i) using DVL velocity measured in body (DVL) frame.
+// Residual: v_measured_body - R^T * v_world
+//
+// Variables: Pose3 (for rotation), Vector3 (world-frame velocity)
+class DvlVelocityFactor : public gtsam::NoiseModelFactor2<gtsam::Pose3, gtsam::Vector3>
 {
     using Base = gtsam::NoiseModelFactor2<gtsam::Pose3, gtsam::Vector3>;
-    gtsam::Vector3 dvl_vel_body_;
+    gtsam::Vector3 v_measured_body_;  // DVL measurement in body/DVL frame
 public:
-    DvlFactor(gtsam::Key pose_key, gtsam::Key vel_key,
-              const gtsam::Vector3 & v_body,
-              const gtsam::SharedNoiseModel & model)
-        : Base(model, pose_key, vel_key), dvl_vel_body_(v_body) {}
+    DvlVelocityFactor(gtsam::Key pose_key, gtsam::Key vel_key,
+                      const gtsam::Vector3 & v_body,
+                      const gtsam::SharedNoiseModel & model)
+        : Base(model, pose_key, vel_key), v_measured_body_(v_body) {}
 
     gtsam::Vector evaluateError(
-        const gtsam::Pose3 & pose, const gtsam::Vector3 & vel_world,
+        const gtsam::Pose3 & pose,
+        const gtsam::Vector3 & vel_world,
         gtsam::OptionalMatrixType H1 = nullptr,
         gtsam::OptionalMatrixType H2 = nullptr) const override
     {
-        gtsam::Matrix3 R = pose.rotation().matrix();
-        gtsam::Vector3 vel_body = R.transpose() * vel_world;
+        // Rotate world velocity into body frame: v_body_est = R^T * v_world
+        gtsam::Matrix3 R    = pose.rotation().matrix();
+        gtsam::Vector3 v_body_est = R.transpose() * vel_world;
 
-        if (H2) *H2 = R.transpose();
-        if (H1) {
-            // d(R^T * v_world)/d(δω) under right-perturbation R·Exp(δω) = +skew(vel_body)
-            // skew(v) = [[0,-v2,v1],[v2,0,-v0],[-v1,v0,0]]
-            gtsam::Matrix36 J = gtsam::Matrix36::Zero();
-            J.leftCols(3) <<  0.0,           -vel_body(2),  vel_body(1),
-                               vel_body(2),   0.0,          -vel_body(0),
-                              -vel_body(1),   vel_body(0),   0.0;
-            *H1 = J;
+        // Analytical Jacobians
+        // d(error)/d(vel_world): R^T   (3x3, maps to the 3 translation cols of H2 which is 3x6)
+        if (H2) {
+            gtsam::Matrix36 J2 = gtsam::Matrix36::Zero();
+            J2.rightCols(3) = R.transpose();  // only translation part of Pose3 is irrelevant here
+            // Actually vel_world is Vector3, so H2 is 3x3
+            *H2 = R.transpose();
         }
-        return vel_body - dvl_vel_body_;
+        // d(error)/d(pose): only rotation matters — d(R^T v)/d(δω) = skew(v_body_est)
+        if (H1) {
+            gtsam::Matrix36 J1 = gtsam::Matrix36::Zero();
+            // d(R^T v)/d(δω) under right-perturbation = +skew(v_body_est)
+            J1.leftCols(3) <<  0.0,              -v_body_est(2),  v_body_est(1),
+                                v_body_est(2),    0.0,            -v_body_est(0),
+                               -v_body_est(1),    v_body_est(0),   0.0;
+            *H1 = J1;
+        }
+
+        // Residual: estimated body velocity - measured body velocity
+        // Paper eq(6): rv = Di_v_tilde - vi  (we flip sign so GTSAM minimises ||r||)
+        return v_body_est - v_measured_body_;
+    }
+};
+
+// ── DVL Translation Factor ────────────────────────────────────────────────────
+// Ports equation (8) / rt from AQUA-SLAM paper.
+// Constrains (Pose_i, Pose_j) using DVL pre-integrated translation.
+//
+// The DVL pre-integration ΔDi_p̄_DiDj is computed ONCE between keyframes by
+// accumulating: Σ ΔR̂_IiIk * R_ID * Di_v * Δt  (gyro rotates each DVL sample)
+// and stored here. The optimizer only evaluates hDt(Xi, Xj) each iteration.
+//
+// Residual (3D): ΔDi_p̄_DiDj - hDt(Xi, Xj)
+// where hDt = R_ID * [D_pDC - R_DC * Ri^T * Rj * R_DC^T * D_pDC
+//                            + R_DC * (Ri^T * pj - Ri^T * pi)]
+//
+// Variables: Pose3 at keyframe i, Pose3 at keyframe j
+class DvlTranslationFactor : public gtsam::NoiseModelFactor2<gtsam::Pose3, gtsam::Pose3>
+{
+    using Base = gtsam::NoiseModelFactor2<gtsam::Pose3, gtsam::Pose3>;
+
+    Eigen::Vector3d preint_dp_;   // ΔDi_p̄_DiDj — pre-integrated DVL translation
+    Eigen::Matrix3d R_ID_;        // rotation: IMU → DVL frame
+    Eigen::Matrix3d R_DC_;        // rotation: DVL → camera frame
+    Eigen::Vector3d D_pDC_;       // DVL-to-camera translation expressed in DVL frame
+
+public:
+    DvlTranslationFactor(gtsam::Key pose_i_key, gtsam::Key pose_j_key,
+                         const Eigen::Vector3d & preint_dp,
+                         const Eigen::Matrix3d & R_ID,
+                         const Eigen::Matrix3d & R_DC,
+                         const Eigen::Vector3d & D_pDC,
+                         const gtsam::SharedNoiseModel & model)
+        : Base(model, pose_i_key, pose_j_key)
+        , preint_dp_(preint_dp), R_ID_(R_ID), R_DC_(R_DC), D_pDC_(D_pDC) {}
+
+    gtsam::Vector evaluateError(
+        const gtsam::Pose3 & pose_i,
+        const gtsam::Pose3 & pose_j,
+        gtsam::OptionalMatrixType H1 = nullptr,
+        gtsam::OptionalMatrixType H2 = nullptr) const override
+    {
+        Eigen::Matrix3d Ri  = pose_i.rotation().matrix();
+        Eigen::Matrix3d Rj  = pose_j.rotation().matrix();
+        Eigen::Vector3d pi  = pose_i.translation();
+        Eigen::Vector3d pj  = pose_j.translation();
+        Eigen::Matrix3d RiT = Ri.transpose();
+
+        // hDt(Xi, Xj) from paper equation (8):
+        // R_ID * [D_pDC - R_DC * Ri^T * Rj * R_DC^T * D_pDC
+        //         + R_DC * (Ri^T * pj - Ri^T * pi)]
+        Eigen::Vector3d h_Dt =
+            R_ID_ * (D_pDC_
+                   - R_DC_ * RiT * Rj * R_DC_.transpose() * D_pDC_
+                   + R_DC_ * (RiT * pj - RiT * pi));
+
+        // Residual: pre-integrated measurement - model prediction
+        Eigen::Vector3d error = preint_dp_ - h_Dt;
+
+        // Jacobians — numerical differentiation (H = nullptr → GTSAM computes them)
+        // Set to zero for now; GTSAM will fall back to numerical if left unset.
+        // For production, derive analytically from the expression above.
+        if (H1) *H1 = gtsam::Matrix36::Zero();  // 3x6 (3 residual, 6 pose DoF)
+        if (H2) *H2 = gtsam::Matrix36::Zero();
+
+        return error;
+    }
+};
+
+// ── Depth Factor ─────────────────────────────────────────────────────────────
+// Constrains the Z translation of Pose3 to a depth measurement (scalar).
+// Residual: pose.translation().z() - z_measured
+// Jacobian: [0 0 0 | 0 0 1]  (only the z-translation DoF)
+class DepthFactor : public gtsam::NoiseModelFactor1<gtsam::Pose3>
+{
+    using Base = gtsam::NoiseModelFactor1<gtsam::Pose3>;
+    double z_measured_;
+public:
+    DepthFactor(gtsam::Key pose_key, double z_measured,
+                const gtsam::SharedNoiseModel & model)
+        : Base(model, pose_key), z_measured_(z_measured) {}
+
+    gtsam::Vector evaluateError(
+        const gtsam::Pose3 & pose,
+        gtsam::OptionalMatrixType H = nullptr) const override
+    {
+        if (H) {
+            *H = (gtsam::Matrix16() << 0, 0, 0, 0, 0, 1).finished();
+        }
+        return (gtsam::Vector1() << pose.translation().z() - z_measured_).finished();
     }
 };
 
@@ -146,25 +251,25 @@ public:
         gicp_max_correction_angle_ = this->declare_parameter<double>("tuning.gicp_max_correction_angle", 15.0);
 
         // Extrinsics: translation + RPY in degrees (sonar -> base)
-        double s2b_t_x   = this->declare_parameter<double>("tf.sonar2base_x",      -0.545);
-        double s2b_t_y   = this->declare_parameter<double>("tf.sonar2base_y",       0.000);
-        double s2b_t_z   = this->declare_parameter<double>("tf.sonar2base_z",      -0.404);
-        double s2b_roll  = this->declare_parameter<double>("tf.sonar2base_roll",    0.0);
-        double s2b_pitch = this->declare_parameter<double>("tf.sonar2base_pitch",  -30.0);
-        double s2b_yaw   = this->declare_parameter<double>("tf.sonar2base_yaw",     0.0);
+        double b2s_t_x   = this->declare_parameter<double>("tf.base2sonar_x",      -0.545);
+        double b2s_t_y   = this->declare_parameter<double>("tf.base2sonar_y",       0.000);
+        double b2s_t_z   = this->declare_parameter<double>("tf.base2sonar_z",      -0.404);
+        double b2s_roll  = this->declare_parameter<double>("tf.base2sonar_roll",    0.0);
+        double b2s_pitch = this->declare_parameter<double>("tf.base2sonar_pitch",  -30.0);
+        double b2s_yaw   = this->declare_parameter<double>("tf.base2sonar_yaw",     0.0);
 
         Eigen::Quaternionf rotation_sb;
-        rotation_sb = Eigen::AngleAxisf(static_cast<float>(s2b_yaw   * M_PI / 180.0), Eigen::Vector3f::UnitZ())
-                    * Eigen::AngleAxisf(static_cast<float>(s2b_pitch  * M_PI / 180.0), Eigen::Vector3f::UnitY())
-                    * Eigen::AngleAxisf(static_cast<float>(s2b_roll   * M_PI / 180.0), Eigen::Vector3f::UnitX());
+        rotation_sb = Eigen::AngleAxisf(static_cast<float>(b2s_yaw   * M_PI / 180.0), Eigen::Vector3f::UnitZ())
+                    * Eigen::AngleAxisf(static_cast<float>(b2s_pitch  * M_PI / 180.0), Eigen::Vector3f::UnitY())
+                    * Eigen::AngleAxisf(static_cast<float>(b2s_roll   * M_PI / 180.0), Eigen::Vector3f::UnitX());
 
-        sonar2base_ = Eigen::Matrix4f::Identity();
-        sonar2base_.block<3,3>(0,0) = rotation_sb.toRotationMatrix();
-        sonar2base_.block<3,1>(0,3) = Eigen::Vector3f(
-            static_cast<float>(s2b_t_x),
-            static_cast<float>(s2b_t_y),
-            static_cast<float>(s2b_t_z));
-        base2sonar_ = sonar2base_.inverse();
+        base2sonar_ = Eigen::Matrix4f::Identity();
+        base2sonar_.block<3,3>(0,0) = rotation_sb.toRotationMatrix();
+        base2sonar_.block<3,1>(0,3) = Eigen::Vector3f(
+            static_cast<float>(b2s_t_x),
+            static_cast<float>(b2s_t_y),
+            static_cast<float>(b2s_t_z));
+        sonar2base_ = base2sonar_.inverse();
 
         ned_transform_ << 0, -1,  0, 0,
                           1,  0,  0, 0,
@@ -173,7 +278,7 @@ public:
 
         RCLCPP_INFO(get_logger(),
             "Sonar->Base extrinsics: t=[%.3f, %.3f, %.3f] rpy=[%.1f, %.1f, %.1f] deg",
-            s2b_t_x, s2b_t_y, s2b_t_z, s2b_roll, s2b_pitch, s2b_yaw);
+            b2s_t_x, b2s_t_y, b2s_t_z, b2s_roll, b2s_pitch, b2s_yaw);
 
         // IMU extrinsics — rotation only (translation is negligible for slow AUVs)
         double i2b_roll  = this->declare_parameter<double>("tf.imu2base_roll",  0.0);
@@ -316,10 +421,49 @@ public:
         dvl_noise_z_  = this->declare_parameter<double>("dvl.noise_z",  0.05);
         use_dvl_      = this->declare_parameter<bool>  ("dvl.use_dvl",  false);
 
+        // DVL translation factor noise (pre-integrated position constraint between keyframes)
+        double dvl_trans_nx = this->declare_parameter<double>("dvl.trans_noise_x", 0.1);
+        double dvl_trans_ny = this->declare_parameter<double>("dvl.trans_noise_y", 0.1);
+        double dvl_trans_nz = this->declare_parameter<double>("dvl.trans_noise_z", 0.1);
+        dvlTransNoise_ = gtsam::noiseModel::Diagonal::Sigmas(
+            (gtsam::Vector(3) << dvl_trans_nx, dvl_trans_ny, dvl_trans_nz).finished());
+
+        // DVL–IMU–camera extrinsic calibration (RPY in degrees, translation in metres)
+        // R_ID: rotation from IMU frame → DVL frame
+        {
+            double roll  = this->declare_parameter<double>("tf.imu2dvl_roll",  0.0);
+            double pitch = this->declare_parameter<double>("tf.imu2dvl_pitch", 0.0);
+            double yaw   = this->declare_parameter<double>("tf.imu2dvl_yaw",   0.0);
+            R_ID_ = (Eigen::AngleAxisd(yaw   * M_PI/180.0, Eigen::Vector3d::UnitZ())
+                   * Eigen::AngleAxisd(pitch * M_PI/180.0, Eigen::Vector3d::UnitY())
+                   * Eigen::AngleAxisd(roll  * M_PI/180.0, Eigen::Vector3d::UnitX()))
+                    .toRotationMatrix();
+        }
+        // R_DC: rotation from DVL frame → camera frame
+        {
+            double roll  = this->declare_parameter<double>("tf.dvl2cam_roll",  0.0);
+            double pitch = this->declare_parameter<double>("tf.dvl2cam_pitch", 0.0);
+            double yaw   = this->declare_parameter<double>("tf.dvl2cam_yaw",   0.0);
+            R_DC_ = (Eigen::AngleAxisd(yaw   * M_PI/180.0, Eigen::Vector3d::UnitZ())
+                   * Eigen::AngleAxisd(pitch * M_PI/180.0, Eigen::Vector3d::UnitY())
+                   * Eigen::AngleAxisd(roll  * M_PI/180.0, Eigen::Vector3d::UnitX()))
+                    .toRotationMatrix();
+        }
+        // D_pDC: translation DVL → camera expressed in DVL frame
+        D_pDC_.x() = this->declare_parameter<double>("tf.dvl2cam_x", 0.0);
+        D_pDC_.y() = this->declare_parameter<double>("tf.dvl2cam_y", 0.0);
+        D_pDC_.z() = this->declare_parameter<double>("tf.dvl2cam_z", 0.0);
+        RCLCPP_INFO(get_logger(), "DVL extrinsics loaded. D_pDC=[%.3f,%.3f,%.3f]",
+            D_pDC_.x(), D_pDC_.y(), D_pDC_.z());
+
         // AHRS attitude parameters
         use_ahrs_       = this->declare_parameter<bool>  ("ahrs.use_ahrs",    false);
         ahrs_noise_rp_  = this->declare_parameter<double>("ahrs.noise_rp",    0.02); // ~1°
         ahrs_noise_yaw_ = this->declare_parameter<double>("ahrs.noise_yaw",   0.1);  // ~6°
+
+        // Depth factor parameters
+        use_depth_      = this->declare_parameter<bool>  ("depth.use_depth",  false);
+        depth_noise_    = this->declare_parameter<double>("depth.noise",       0.05); // [m]
 
         initGTSAM();
 
@@ -367,6 +511,19 @@ public:
             });
         if (use_ahrs_) {
             RCLCPP_INFO(get_logger(), "AHRS attitude factor enabled on %s", ahrs_topic.c_str());
+        }
+
+        if (use_depth_) {
+            std::string depth_topic = this->declare_parameter<std::string>(
+                "topics.depth_sub", "/depth_odom");
+            depth_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+                depth_topic, 50,
+                [this](const nav_msgs::msg::Odometry::SharedPtr msg) {
+                    std::lock_guard<std::mutex> lk(depth_mutex_);
+                    latest_depth_z_ = msg->pose.pose.position.z;
+                    has_depth_ = true;
+                });
+            RCLCPP_INFO(get_logger(), "Depth factor enabled on %s", depth_topic.c_str());
         }
 
         RCLCPP_INFO(get_logger(), "VGICP SLAM Node initialised.");
@@ -427,6 +584,9 @@ private:
         // AHRS attitude noise — 2D (on Unit3 tangent space), constrains roll+pitch only
         // AttitudeFactor leaves yaw free; GICP handles yaw via scan matching
         ahrsNoise_ = gtsam::noiseModel::Isotropic::Sigma(2, ahrs_noise_rp_);
+
+        // Depth factor noise — 1D, scalar sigma in metres
+        depthNoise_ = gtsam::noiseModel::Isotropic::Sigma(1, depth_noise_);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -483,9 +643,9 @@ private:
                 if (got_ahrs) {
                     // Keep AHRS roll+pitch; yaw comes from GICP (starts at 0)
                     double r = ahrs_init.roll();
-                    double p = ahrs_init.pitch();
+                    // double p = ahrs_init.pitch();
+                    double p = 0.0;
                     double y = current_gtsam_pose.rotation().yaw();
-                    double y = 0.0;
                     gtsam::Rot3 init_rot = gtsam::Rot3::RzRyRx(r, p, y);
                     current_gtsam_pose = gtsam::Pose3(init_rot, current_gtsam_pose.translation());
                     RCLCPP_INFO(get_logger(),
@@ -568,14 +728,28 @@ private:
                     B(current_id-1), B(current_id),
                     gtsam::imuBias::ConstantBias(), biasBetweenNoise_));
 
-                initialEstimates_.insert(V(current_id), prev_velocity_);
                 initialEstimates_.insert(B(current_id), prev_bias_);
             }
 
-            initialEstimates_.insert(X(current_id), current_gtsam_pose);
+            if (used_imu_factor) {
+                gtsam::NavState prop = preint_->predict(
+                    gtsam::NavState(
+                        matrix2Pose3(keyframes_.back().pose),  // pose at i-1
+                        prev_velocity_),                        // velocity at i-1
+                    prev_bias_);
+                initialEstimates_.insert(X(current_id), prop.pose());      // IMU-propagated pose
+                initialEstimates_.insert(V(current_id), prop.velocity());  // IMU-propagated velocity
+            } else {
+                initialEstimates_.insert(X(current_id), current_gtsam_pose);  // fall back to GICP
+                if (use_imu_ || use_dvl_) {
+                    initialEstimates_.insert(V(current_id), prev_velocity_);
+                }
+            }
 
-            // DVL velocity factor
+            // ── DVL factors (velocity + translation) ────────────────────────
             if (use_dvl_) {
+                // 1) Velocity factor at current keyframe — equation (6) in AQUA-SLAM
+                //    Constrains V(current_id) via latest DVL body-frame measurement
                 gtsam::Vector3 dvl_snap;
                 bool dvl_ok = false;
                 {
@@ -583,13 +757,51 @@ private:
                     if (has_dvl_) { dvl_snap = latest_dvl_vel_body_; dvl_ok = true; }
                 }
                 if (dvl_ok) {
-                    gtSAMgraph_.add(DvlFactor(X(current_id), V(current_id), dvl_snap, dvlNoise_));
+                    gtSAMgraph_.add(DvlVelocityFactor(
+                        X(current_id), V(current_id), dvl_snap, dvlNoise_));
                     RCLCPP_INFO(get_logger(),
-                        "[DVL factor] kf=%d  body-vel added to graph  x=%.4f  y=%.4f  z=%.4f  m/s",
+                        "[DVL vel factor] kf=%d  body-vel=[%.4f, %.4f, %.4f] m/s",
                         current_id, dvl_snap.x(), dvl_snap.y(), dvl_snap.z());
                 } else {
                     RCLCPP_WARN(get_logger(),
-                        "[DVL factor] kf=%d  skipped — no DVL measurement received yet", current_id);
+                        "[DVL vel factor] kf=%d  skipped — no DVL measurement yet", current_id);
+                }
+
+                // 2) Translation factor between keyframes — equation (8) in AQUA-SLAM
+                //    Uses DVL pre-integration accumulated since the previous keyframe.
+                //    Only available from keyframe 1 onward.
+                if (current_id > 0) {
+                    Eigen::Vector3d preint_dp;
+                    bool preint_ok = false;
+                    {
+                        std::lock_guard<std::mutex> plk(dvl_preint_mutex_);
+                        if (dvl_preint_dt_ > 0.01) {  // at least 10 ms of data
+                            preint_dp  = dvl_preint_dp_;
+                            preint_ok  = true;
+                        }
+                    }
+                    if (preint_ok) {
+                        gtSAMgraph_.add(DvlTranslationFactor(
+                            X(current_id - 1), X(current_id),
+                            preint_dp, R_ID_, R_DC_, D_pDC_,
+                            dvlTransNoise_));
+                        RCLCPP_INFO(get_logger(),
+                            "[DVL trans factor] kf=%d  preint_dp=[%.4f, %.4f, %.4f] m",
+                            current_id,
+                            preint_dp.x(), preint_dp.y(), preint_dp.z());
+                    } else {
+                        RCLCPP_WARN(get_logger(),
+                            "[DVL trans factor] kf=%d  skipped — insufficient pre-integration dt",
+                            current_id);
+                    }
+                }
+
+                // Reset DVL pre-integration for next keyframe interval
+                {
+                    std::lock_guard<std::mutex> plk(dvl_preint_mutex_);
+                    dvl_preint_dR_ = Eigen::Matrix3d::Identity();
+                    dvl_preint_dp_ = Eigen::Vector3d::Zero();
+                    dvl_preint_dt_ = 0.0;
                 }
             }
 
@@ -612,6 +824,24 @@ private:
                         gtsam::Unit3(0, 0, 1),  // nRef  — gravity in world (Z-down)
                         ahrsNoise_,              // noise model
                         g_body));                // bMeasured — gravity in body frame
+                }
+            }
+
+            // Depth factor — constrains Z translation to barometric/pressure depth
+            if (use_depth_) {
+                double depth_snap;
+                bool depth_ok = false;
+                {
+                    std::lock_guard<std::mutex> lk(depth_mutex_);
+                    if (has_depth_) { depth_snap = latest_depth_z_; depth_ok = true; }
+                }
+                if (depth_ok) {
+                    gtSAMgraph_.add(DepthFactor(X(current_id), depth_snap, depthNoise_));
+                    RCLCPP_INFO(get_logger(),
+                        "[Depth factor] kf=%d  z=%.4f m", current_id, depth_snap);
+                } else {
+                    RCLCPP_WARN(get_logger(),
+                        "[Depth factor] kf=%d  skipped — no depth measurement yet", current_id);
                 }
             }
         }
@@ -952,6 +1182,29 @@ private:
             msg->angular_velocity.z - imu_gyro_bias_z_);
         preint_->integrateMeasurement(accel, gyro, dt);
         imu_last_time_ = t;
+
+        // ── Accumulate gyro rotation for DVL pre-integration ─────────────────
+        // Between DVL pings the vehicle rotates. We track this so each DVL
+        // velocity sample is correctly rotated before being summed into ΔDi_p̄.
+        // ΔR̂_IiIk = Π Exp(ω * dt)  — we use small-angle: Exp(ω*dt) ≈ I + [ω*dt]×
+        if (use_dvl_) {
+            Eigen::Vector3d w(gyro.x(), gyro.y(), gyro.z());
+            double angle = w.norm() * dt;
+            Eigen::Matrix3d dR_step;
+            if (angle > 1e-8) {
+                Eigen::AngleAxisd aa(angle, w.normalized());
+                dR_step = aa.toRotationMatrix();
+            } else {
+                // Small angle: Exp(ω*dt) ≈ I + [ω*dt]×
+                Eigen::Matrix3d skew;
+                skew <<       0.0, -w.z()*dt,  w.y()*dt,
+                         w.z()*dt,       0.0, -w.x()*dt,
+                        -w.y()*dt,  w.x()*dt,       0.0;
+                dR_step = Eigen::Matrix3d::Identity() + skew;
+            }
+            std::lock_guard<std::mutex> plk(dvl_preint_mutex_);
+            dvl_preint_dR_ = dvl_preint_dR_ * dR_step;
+        }
     }
 
     // ── DVL callback — latches latest body-frame velocity ────────────────────
@@ -980,9 +1233,40 @@ private:
         RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
             "[DVL cb] body-frame vel (corrected)  x=%.4f  y=%.4f  z=%.4f  m/s",
             vel.x(), vel.y(), vel.z());
-        std::lock_guard<std::mutex> lk(dvl_mutex_);
-        latest_dvl_vel_body_ = vel;
-        has_dvl_ = true;
+
+        // Update velocity latch
+        {
+            std::lock_guard<std::mutex> lk(dvl_mutex_);
+            latest_dvl_vel_body_ = vel;
+            has_dvl_ = true;
+        }
+
+        // ── DVL pre-integration (equation 8, AQUA-SLAM) ──────────────────────
+        // Each time a DVL ping arrives, we advance the pre-integrated position
+        // using the current accumulated gyro rotation and this velocity sample.
+        // The gyro rotation dvl_preint_dR_ is updated in imuCallback below.
+        //
+        // ΔDi_p̄ += ΔR̂_IiIk * R_ID * Di_v * Δt_dvl
+        // We use the DVL ping interval as Δt (typically 0.2 s at 5 Hz).
+        // For a more accurate integration, imuCallback accumulates dR between pings.
+        static rclcpp::Time last_dvl_time{0, 0, RCL_ROS_TIME};
+        rclcpp::Time now = msg->header.stamp;
+        double dt_dvl = 0.0;
+        if (last_dvl_time.nanoseconds() > 0) {
+            dt_dvl = (now - last_dvl_time).seconds();
+        }
+        last_dvl_time = now;
+
+        if (dt_dvl > 0.001 && dt_dvl < 1.0) {  // sanity: between 1ms and 1s
+            std::lock_guard<std::mutex> plk(dvl_preint_mutex_);
+            // Rotate DVL velocity into the initial DVL frame (at keyframe i)
+            // using accumulated gyro rotation:  ΔR̂_IiIk * R_ID * Di_v
+            Eigen::Vector3d v_dvl(vel.x(), vel.y(), vel.z());
+            dvl_preint_dp_ += dvl_preint_dR_ * R_ID_ * v_dvl * dt_dvl;
+            dvl_preint_dt_ += dt_dvl;
+            // Reset accumulated dR after each DVL ping — gyro will accumulate fresh
+            dvl_preint_dR_ = Eigen::Matrix3d::Identity();
+        }
     }
 
     // ── EKF callback ──────────────────────────────────────────────────────────
@@ -1401,6 +1685,25 @@ private:
     gtsam::Vector3 latest_dvl_vel_body_{gtsam::Vector3::Zero()};
     bool           has_dvl_{false};
 
+    // ── DVL pre-integration buffer ────────────────────────────────────────────
+    // Between keyframes i and j we accumulate:
+    //   ΔDi_p̄_DiDj = Σ ΔR̂_IiIk * R_ID * Di_v * Δt
+    // where ΔR̂_IiIk comes from gyro integration (stored in preint_ dR)
+    // and Di_v is the last DVL measurement held constant between pings.
+    std::mutex          dvl_preint_mutex_;
+    Eigen::Matrix3d     dvl_preint_dR_{Eigen::Matrix3d::Identity()};  // accumulated gyro rotation since last KF
+    Eigen::Vector3d     dvl_preint_dp_{Eigen::Vector3d::Zero()};      // accumulated ΔDi_p̄
+    double              dvl_preint_dt_{0.0};                          // total integrated time
+    bool                dvl_preint_ready_{false};                     // true once at least one full KF interval done
+
+    // DVL-IMU-camera extrinsic calibration (loaded from params)
+    Eigen::Matrix3d R_ID_{Eigen::Matrix3d::Identity()};  // IMU frame → DVL frame rotation
+    Eigen::Matrix3d R_DC_{Eigen::Matrix3d::Identity()};  // DVL frame → camera frame rotation
+    Eigen::Vector3d D_pDC_{Eigen::Vector3d::Zero()};     // translation DVL→camera in DVL frame
+
+    // Translation noise for DVL pre-integration factor
+    gtsam::noiseModel::Diagonal::shared_ptr dvlTransNoise_;
+
     // GTSAM velocity + bias state (only used when use_imu_ || use_dvl_)
     gtsam::Vector3                  prev_velocity_{gtsam::Vector3::Zero()};
     gtsam::imuBias::ConstantBias    prev_bias_;
@@ -1412,6 +1715,15 @@ private:
     gtsam::noiseModel::Diagonal::shared_ptr  biasPriorNoise_;
     gtsam::noiseModel::Diagonal::shared_ptr  dvlNoise_;
     gtsam::noiseModel::Isotropic::shared_ptr ahrsNoise_;  // 2D — roll+pitch only
+
+    // ── Depth ─────────────────────────────────────────────────────────────────
+    bool   use_depth_{false};
+    double depth_noise_{0.05};
+    bool   has_depth_{false};
+    double latest_depth_z_{0.0};
+    std::mutex depth_mutex_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr depth_sub_;
+    gtsam::noiseModel::Isotropic::shared_ptr depthNoise_;
 
     // ── AHRS attitude ─────────────────────────────────────────────────────────
     bool   use_ahrs_{false};

@@ -37,7 +37,7 @@ def generate_launch_description():
                 'relative_depth': 'false',
                 'depth_topic':    '/global_position/rel_alt',
                 'ned':            'false',
-                'ahrs': 'false',
+                'ahrs': 'true',
             }.items(),
         )
 
