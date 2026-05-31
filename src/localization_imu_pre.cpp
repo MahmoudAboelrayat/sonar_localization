@@ -683,20 +683,28 @@ private:
                     "[IMU warmup] kf=%d/%d — using GICP odometry until pose is reliable",
                     current_id, imu_start_kf_);
             }
-            if (!used_imu_factor) {
-                // fall back to pose-only odometry factor
-                gtsam::Pose3 prev_gtsam = matrix2Pose3(keyframes_.back().pose);
-                gtsam::Pose3 relative   = prev_gtsam.between(current_gtsam_pose);
-                gtSAMgraph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
-                    X(current_id-1), X(current_id), relative, odomNoise_));
 
-                // Velocity random walk: V(k) is otherwise unconstrained when the
-                // IMU factor is absent. Without this, the linear system is singular.
-                if (use_imu_ || use_dvl_) {
-                    gtSAMgraph_.add(gtsam::BetweenFactor<gtsam::Vector3>(
-                        V(current_id-1), V(current_id),
-                        gtsam::Vector3::Zero(), velocityBetweenNoise_));
+            gtsam::Pose3 prev_gtsam = matrix2Pose3(keyframes_.back().pose);
+            gtsam::Pose3 relative   = prev_gtsam.between(current_gtsam_pose);
+            gtSAMgraph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
+                X(current_id-1), X(current_id), relative, odomNoise_));
+
+            // Also add IMU factor if available — they work together
+            if (use_imu_ && preint_ && current_id >= imu_start_kf_) {
+                std::lock_guard<std::mutex> ilk(imu_mutex_);
+                if (preint_->deltaTij() > 0.01) {
+                    gtSAMgraph_.add(gtsam::ImuFactor(
+                        X(current_id-1), V(current_id-1),
+                        X(current_id),   V(current_id),
+                        B(current_id-1), *preint_));
+                    used_imu_factor = true;
                 }
+            }
+            // IMU factor is absent. Without this, the linear system is singular.
+            if (use_imu_ || use_dvl_) {
+                gtSAMgraph_.add(gtsam::BetweenFactor<gtsam::Vector3>(
+                    V(current_id-1), V(current_id),
+                    gtsam::Vector3::Zero(), velocityBetweenNoise_));
             }
 
             if (use_imu_ || use_dvl_) {
