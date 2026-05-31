@@ -70,8 +70,8 @@ public:
     gtsam::Vector evaluateError(
         const gtsam::Pose3 & pose,
         const gtsam::Vector3 & vel_world,
-        gtsam::OptionalMatrixType H1 = nullptr,
-        gtsam::OptionalMatrixType H2 = nullptr) const override
+        boost::optional<gtsam::Matrix &> H1 = boost::none,
+        boost::optional<gtsam::Matrix &> H2 = boost::none) const override
     {
         // Rotate world velocity into body frame: v_body_est = R^T * v_world
         gtsam::Matrix3 R    = pose.rotation().matrix();
@@ -136,8 +136,8 @@ public:
     gtsam::Vector evaluateError(
         const gtsam::Pose3 & pose_i,
         const gtsam::Pose3 & pose_j,
-        gtsam::OptionalMatrixType H1 = nullptr,
-        gtsam::OptionalMatrixType H2 = nullptr) const override
+        boost::optional<gtsam::Matrix &> H1 = boost::none,
+        boost::optional<gtsam::Matrix &> H2 = boost::none) const override
     {
         Eigen::Matrix3d Ri  = pose_i.rotation().matrix();
         Eigen::Matrix3d Rj  = pose_j.rotation().matrix();
@@ -163,30 +163,6 @@ public:
         if (H2) *H2 = gtsam::Matrix36::Zero();
 
         return error;
-    }
-};
-
-// ── Depth Factor ─────────────────────────────────────────────────────────────
-// Constrains the Z translation of Pose3 to a depth measurement (scalar).
-// Residual: pose.translation().z() - z_measured
-// Jacobian: [0 0 0 | 0 0 1]  (only the z-translation DoF)
-class DepthFactor : public gtsam::NoiseModelFactor1<gtsam::Pose3>
-{
-    using Base = gtsam::NoiseModelFactor1<gtsam::Pose3>;
-    double z_measured_;
-public:
-    DepthFactor(gtsam::Key pose_key, double z_measured,
-                const gtsam::SharedNoiseModel & model)
-        : Base(model, pose_key), z_measured_(z_measured) {}
-
-    gtsam::Vector evaluateError(
-        const gtsam::Pose3 & pose,
-        gtsam::OptionalMatrixType H = nullptr) const override
-    {
-        if (H) {
-            *H = (gtsam::Matrix16() << 0, 0, 0, 0, 0, 1).finished();
-        }
-        return (gtsam::Vector1() << pose.translation().z() - z_measured_).finished();
     }
 };
 
@@ -644,8 +620,8 @@ private:
                 if (got_ahrs) {
                     // Keep AHRS roll+pitch; yaw comes from GICP (starts at 0)
                     double r = ahrs_init.roll();
-                    // double p = ahrs_init.pitch();
-                    double p = 0.0;
+                    double p = ahrs_init.pitch();
+                    // double p = 0.0;
                     double y = current_gtsam_pose.rotation().yaw();
                     gtsam::Rot3 init_rot = gtsam::Rot3::RzRyRx(r, p, y);
                     current_gtsam_pose = gtsam::Pose3(init_rot, current_gtsam_pose.translation());
@@ -820,7 +796,7 @@ private:
                     // nRef    = gravity direction in world   = (0,0,1) for Z-down
                     // bMeasured = gravity direction in body  = R_wb^T * (0,0,1)
                     gtsam::Unit3 g_body(ahrs_snap.transpose() * gtsam::Vector3(0, 0, 1));
-                    gtSAMgraph_.add(gtsam::AttitudeFactor<gtsam::Pose3>(
+                    gtSAMgraph_.add(gtsam::Pose3AttitudeFactor(
                         X(current_id),
                         gtsam::Unit3(0, 0, 1),  // nRef  — gravity in world (Z-down)
                         ahrsNoise_,              // noise model

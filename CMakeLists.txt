@@ -157,6 +157,19 @@ target_link_libraries(prior_map_publisher
   ${PCL_LIBRARIES}
 )
 
+# Node: registration_benchmark
+add_executable(registration_benchmark src/registration_benchmark.cpp)
+ament_target_dependencies(registration_benchmark
+  rclcpp sensor_msgs nav_msgs pcl_conversions fast_gicp
+)
+target_include_directories(registration_benchmark PUBLIC
+  ${PCL_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+)
+target_link_libraries(registration_benchmark
+  ${PCL_LIBRARIES}
+)
+
 # Node: localization_imu_pre (VGICP SLAM + IMU preintegration + DVL factor)
 add_executable(localization_imu_pre src/localization_imu_pre.cpp)
 ament_target_dependencies(localization_imu_pre
@@ -177,6 +190,7 @@ target_link_libraries(localization_imu_pre
 # Install C++ Executables
 install(TARGETS
   localization_imu_pre
+  registration_benchmark
   loopclosure_vgicp
   loopclosure_samll_vgicp
   prior_map_localizer

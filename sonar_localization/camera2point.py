@@ -158,10 +158,10 @@ class PointCloudProjector(Node):
         # Translation: sonar_pos - camera_pos, measured in body/NED frame (X=fwd, Y=right, Z=down)
         # Example: sonar is 0.3m ahead and 0.1m below the camera → tx=0.3, tz=0.1
         self.declare_parameter("ext.roll",  0.0)   # degrees — camera mounting correction
-        self.declare_parameter("ext.pitch", 0.0)
+        self.declare_parameter("ext.pitch", -2.0)
         self.declare_parameter("ext.yaw",   0.0)
-        self.declare_parameter("ext.tx",    0.0)   # metres — sonar_pos minus cam_pos, NED X (fwd)
-        self.declare_parameter("ext.ty",    0.0)   # metres — sonar_pos minus cam_pos, NED Y (right)
+        self.declare_parameter("ext.tx",    0.01)   # metres — sonar_pos minus cam_pos, NED X (fwd)
+        self.declare_parameter("ext.ty",    0.09)   # metres — sonar_pos minus cam_pos, NED Y (right)
         self.declare_parameter("ext.tz",    0.0)   # metres — sonar_pos minus cam_pos, NED Z (down)
 
         roll_deg  = self.get_parameter("ext.roll").value
