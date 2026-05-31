@@ -172,6 +172,17 @@ target_link_libraries(prior_map_publisher
 )
 
 
+add_executable(registration_benchmark src/registration_benchmark.cpp)
+ament_target_dependencies(registration_benchmark
+  rclcpp sensor_msgs nav_msgs pcl_conversions fast_gicp
+)
+target_include_directories(registration_benchmark PUBLIC
+  ${PCL_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+)
+target_link_libraries(registration_benchmark
+  ${PCL_LIBRARIES}
+)
 # --- 4. Install Directives ---
 
 # Install C++ Executables
@@ -186,6 +197,7 @@ install(TARGETS
   fastvgicp_odom
   imu_preintegration
   mapping
+  registration_benchmark
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -241,6 +253,10 @@ install(PROGRAMS ${PROJECT_NAME}/sonar_noise.py
 install(PROGRAMS ${PROJECT_NAME}/odom_tf.py
         DESTINATION lib/${PROJECT_NAME}
         RENAME odom_tf)
+
+install(PROGRAMS ${PROJECT_NAME}/odom_error.py
+        DESTINATION lib/${PROJECT_NAME}
+        RENAME odom_error)
 
 # Install Shared Directories
 install(DIRECTORY launch config rviz description

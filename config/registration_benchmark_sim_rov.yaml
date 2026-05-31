@@ -1,0 +1,61 @@
+vgicp_odom_node:
+  ros__parameters:
+    is_ned: false
+    ekf_z: false
+    ekf_fallback: false          # publish EKF-predicted pose when registration fails
+
+    topics:
+      odom_pub: "vgicp_odom"
+      pc_sub: "/sonar/point_cloud_noisy"
+      deadreckoining_sub: "/odometry/filtered"
+      map_pub: "vgicp_global_map"
+      history_map_pub: "vgicp_full_map"
+      filtered_pc_pub: "filtered_cloud"
+
+    registration:
+      method: "VGICP"   # VGICP | GICP | ICP | NDT | ICPNL
+
+    tuning:
+      map_res: 0.3
+      vgicp_threads: 4
+      vgicp_epsilon: 1e-3
+      vgicp_max_dist: 0.9
+      vgicp_max_iter: 150
+      vgicp_resolution: 0.5
+      max_lost_frames: 80
+      ndt_resolution: 1.0
+      ndt_step_size: 0.5
+      ndt_max_iter: 50
+      ndt_epsilon: 1e-3
+      normal_k_search: 20
+
+    radius_outlier_removal:
+      filter_radius_outliers: false
+      radius_search: 0.5
+      min_neighbors: 5
+
+    outlier_removal:
+      filter_outliers: false
+      num_neighbors: 20
+      stddev_mul_thresh: 1.5
+
+    intensity_filter:
+      filter_intensity: false
+      min_intensity: 0.0
+
+    tf:
+      sonar2base_x: 0.007
+      sonar2base_y: 0.000
+      sonar2base_z: -0.091
+      sonar2base_roll: 0.0
+      sonar2base_pitch: -30.0   # degrees (- down / + up)
+      sonar2base_yaw: 0.0
+
+    keyframe:
+      submap_size: 40
+      dist_thresh: 0.5
+      angle_thresh: 5.0         # degrees
+
+    frames:
+      odom_frame: "odom"
+      base_frame: "BlueROV2_Heavy/base_link"
