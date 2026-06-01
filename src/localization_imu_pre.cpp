@@ -70,8 +70,8 @@ public:
     gtsam::Vector evaluateError(
         const gtsam::Pose3 & pose,
         const gtsam::Vector3 & vel_world,
-        boost::optional<gtsam::Matrix &> H1 = boost::none,
-        boost::optional<gtsam::Matrix &> H2 = boost::none) const override
+        gtsam::OptionalMatrixType H1 = nullptr,
+        gtsam::OptionalMatrixType H2 = nullptr) const override
     {
         // Rotate world velocity into body frame: v_body_est = R^T * v_world
         gtsam::Matrix3 R    = pose.rotation().matrix();
@@ -136,8 +136,8 @@ public:
     gtsam::Vector evaluateError(
         const gtsam::Pose3 & pose_i,
         const gtsam::Pose3 & pose_j,
-        boost::optional<gtsam::Matrix &> H1 = boost::none,
-        boost::optional<gtsam::Matrix &> H2 = boost::none) const override
+        gtsam::OptionalMatrixType H1 = nullptr,
+        gtsam::OptionalMatrixType H2 = nullptr) const override
     {
         Eigen::Matrix3d Ri  = pose_i.rotation().matrix();
         Eigen::Matrix3d Rj  = pose_j.rotation().matrix();
@@ -163,6 +163,30 @@ public:
         if (H2) *H2 = gtsam::Matrix36::Zero();
 
         return error;
+    }
+};
+
+// ── Depth Factor ─────────────────────────────────────────────────────────────
+// Constrains the Z translation of Pose3 to a depth measurement (scalar).
+// Residual: pose.translation().z() - z_measured
+// Jacobian: [0 0 0 | 0 0 1]  (only the z-translation DoF)
+class DepthFactor : public gtsam::NoiseModelFactor1<gtsam::Pose3>
+{
+    using Base = gtsam::NoiseModelFactor1<gtsam::Pose3>;
+    double z_measured_;
+public:
+    DepthFactor(gtsam::Key pose_key, double z_measured,
+                const gtsam::SharedNoiseModel & model)
+        : Base(model, pose_key), z_measured_(z_measured) {}
+
+    gtsam::Vector evaluateError(
+        const gtsam::Pose3 & pose,
+        gtsam::OptionalMatrixType H = nullptr) const override
+    {
+        if (H) {
+            *H = (gtsam::Matrix16() << 0, 0, 0, 0, 0, 1).finished();
+        }
+        return (gtsam::Vector1() << pose.translation().z() - z_measured_).finished();
     }
 };
 
@@ -396,7 +420,8 @@ public:
         dvl_noise_x_  = this->declare_parameter<double>("dvl.noise_x",  0.05);
         dvl_noise_y_  = this->declare_parameter<double>("dvl.noise_y",  0.05);
         dvl_noise_z_  = this->declare_parameter<double>("dvl.noise_z",  0.05);
-        use_dvl_      = this->declare_parameter<bool>  ("dvl.use_dvl",  false);
+        use_dvl_       = this->declare_parameter<bool>("dvl.use_dvl",       false);
+        use_dvl_trans_ = this->declare_parameter<bool>("dvl.use_dvl_trans", false);
 
         // DVL translation factor noise (pre-integrated position constraint between keyframes)
         double dvl_trans_nx = this->declare_parameter<double>("dvl.trans_noise_x", 0.1);
@@ -688,6 +713,14 @@ private:
             gtsam::Pose3 relative   = prev_gtsam.between(current_gtsam_pose);
             gtSAMgraph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
                 X(current_id-1), X(current_id), relative, odomNoise_));
+            {
+                gtsam::Vector3 dt = relative.translation();
+                gtsam::Vector3 rpy = relative.rotation().rpy();
+                RCLCPP_INFO(get_logger(),
+                    "[VGICP factor] kf=%d  dt=[%.4f, %.4f, %.4f] m  drpy=[%.3f, %.3f, %.3f] deg",
+                    current_id, dt.x(), dt.y(), dt.z(),
+                    rpy(0)*180.0/M_PI, rpy(1)*180.0/M_PI, rpy(2)*180.0/M_PI);
+            }
 
             // Also add IMU factor if available — they work together
             if (use_imu_ && preint_ && current_id >= imu_start_kf_) {
@@ -755,7 +788,7 @@ private:
                 // 2) Translation factor between keyframes — equation (8) in AQUA-SLAM
                 //    Uses DVL pre-integration accumulated since the previous keyframe.
                 //    Only available from keyframe 1 onward.
-                if (current_id > 0) {
+                if (use_dvl_trans_ && current_id > 0) {
                     Eigen::Vector3d preint_dp;
                     bool preint_ok = false;
                     {
@@ -804,7 +837,7 @@ private:
                     // nRef    = gravity direction in world   = (0,0,1) for Z-down
                     // bMeasured = gravity direction in body  = R_wb^T * (0,0,1)
                     gtsam::Unit3 g_body(ahrs_snap.transpose() * gtsam::Vector3(0, 0, 1));
-                    gtSAMgraph_.add(gtsam::Pose3AttitudeFactor(
+                    gtSAMgraph_.add(gtsam::AttitudeFactor<gtsam::Pose3>(
                         X(current_id),
                         gtsam::Unit3(0, 0, 1),  // nRef  — gravity in world (Z-down)
                         ahrsNoise_,              // noise model
@@ -1654,7 +1687,7 @@ private:
     double lc_huber_k_{1.0};
 
     // ── IMU / DVL ─────────────────────────────────────────────────────────────
-    bool   use_imu_{false}, use_dvl_{false};
+    bool   use_imu_{false}, use_dvl_{false}, use_dvl_trans_{false};
     int    imu_start_kf_{0};   // keyframes to wait before activating ImuFactor
 
     // IMU preintegration

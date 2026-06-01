@@ -84,8 +84,8 @@ localization_imu_pre:
       ndt_epsilon: 0.01
 
     gtsam:
-      odom_noise_x: 0.3
-      odom_noise_y: 0.3
+      odom_noise_x: 0.1
+      odom_noise_y: 0.1
       odom_noise_z: 0.001
       odom_noise_roll: 0.001
       odom_noise_pitch: 0.001
@@ -118,12 +118,13 @@ localization_imu_pre:
 
     dvl:
       use_dvl: true            # set true to enable DVL velocity factor
+      use_dvl_trans: false     # set true to also enable DVL pre-integrated translation factor
       noise_x: 0.001             # [m/s]
       noise_y: 0.001
       noise_z: 0.05
-      trans_noise_x: 0.01        # [m/s] DVL translation noise x
-      trans_noise_y: 0.01        # [m/s] DVL translation noise y
-      trans_noise_z: 0.01        # [m/s] DVL translation noise z
+      trans_noise_x: 0.01        # [m] DVL translation noise x
+      trans_noise_y: 0.01        # [m] DVL translation noise y
+      trans_noise_z: 0.01        # [m] DVL translation noise z
 
     frames:
       odom_frame: "icp_map"

@@ -177,7 +177,6 @@ target_link_libraries(localization_imu_pre
 # Install C++ Executables
 install(TARGETS
   localization_imu_pre
-  registration_benchmark
   loopclosure_vgicp
   loopclosure_samll_vgicp
   prior_map_localizer
@@ -186,23 +185,9 @@ install(TARGETS
   gicp_odom
   fastgicp_odom
   fastvgicp_odom
-  #imu_preintegration
   mapping
   DESTINATION lib/${PROJECT_NAME}
 )
-
-# Install Python Scripts
-# install(PROGRAMS
-#   ${PROJECT_NAME}/dvl_bridge.py
-#   ${PROJECT_NAME}/imu_bridge.py
-#   ${PROJECT_NAME}/depth_bridge.py
-#   ${PROJECT_NAME}/ekf_to_csv_logger.py
-#   ${PROJECT_NAME}/pub_icp_data.py
-#   ${PROJECT_NAME}/pointcloud_intensity.py
-#   ${PROJECT_NAME}/pointcloud_features.py
-#   ${PROJECT_NAME}/sonar_noise.py
-#   DESTINATION lib/${PROJECT_NAME}
-# )
 
 install(PROGRAMS ${PROJECT_NAME}/gt_map.py 
         DESTINATION lib/${PROJECT_NAME} 
