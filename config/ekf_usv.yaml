@@ -1,47 +1,55 @@
 ekf_local:
   ros__parameters:
     frequency: 30.0
-    two_d_mode: false
-    publish_tf: true
+    two_d_mode: true
+    publish_tf: false
 
-    map_frame: "Beckholmen"
-    odom_frame: "ekf_odom"
+    map_frame: "map"
+    odom_frame: "odom"
     base_link_frame: "base_link"
-    world_frame: "ekf_odom"    
+    world_frame: "odom"    
 
     # IMU (Angular Velocity & Linear Accel)
-    imu0: "/imu/data_noisy"
-    imu0_config: [false, false, false,
-                  true, true, false,
-                  false, false, false,
-                  false,  false,  true,
-                  true,  true,  false]
-    imu0_differential: false
-    imu0_relative: true
-    imu0_remove_gravitational_acceleration: true
+    # imu0: "/imu/data_cov"
+    # imu0_config: [false, false, false,
+    #               false, false, false,
+    #               false,  false,  false,
+    #               false,  false,  true]
+    # imu0_differential: false
+    # imu0_relative: true
+    # imu0_remove_gravitational_acceleration: true
     # imu0_pose_rejection_threshold: 0.8      
     # imu0_twist_rejection_threshold: 0.8
 
 
     # DVL (Linear Velocity)
-    twist0: "/dvl"
-    twist0_config: [false, false, false,
-                    false, false, false,
-                    true,  true,  false,   # X, Y, Z velocities
-                    false, false, false,
+    # twist0: "/dvl"
+    # twist0_config: [false, false, false,
+    #                 false, false, false,
+    #                 true,  true,  false,   # X, Y, Z velocities
+    #                 false, false, false,
+    #                 false, false, false]
+
+
+
+    # GPS position from navsat_transform_node (absolute x, y in odom frame)
+    odom0: odometry/gps
+    odom0_config: [true,  true,  false,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+    odom0_differential: false
+    odom0_relative: false
+
+    # odom1: imu/odometry
+    odom1_config: [false, false, false,
+                   false, false, true,
+                   false,  false,  false,   # X, Y, Z positions
+                   false, false, false,           
                     false, false, false]
-
-
-
-    # odom0: /vgicp_odom
-    # odom0_config: [true,  true,  false,
-    #                false,  false,  true,
-    #                false, false, false,
-    #                false, false, false,
-    #                false, false, false]
-    
-    # odom0_differential: true
-    # PLUS THE ABSOLUTE DEPTH
+    odom1_differential: false
+    odom1_relative: false
 
 navsat_transform:
   ros__parameters:

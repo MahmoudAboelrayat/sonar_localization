@@ -4,7 +4,7 @@ fastvgicp_odom:
     ekf_z: true
     topics:
       odom_pub: "vgicp_odom"
-      pc_sub: "/sonar/point_cloud_intensity"
+      pc_sub: "/sonar/point_cloud"
       ekf_sub: "/odometry/filtered"
       map_pub: "vgicp_global_map"
       

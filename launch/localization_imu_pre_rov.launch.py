@@ -12,6 +12,7 @@ def launch_setup(context, *args, **kwargs):
     pkg_share = get_package_share_directory('sonar_localization')
     ekf_config_path  = os.path.join(pkg_share, 'config', 'ekf_loop.yaml')
     imu_config_path  = os.path.join(pkg_share, 'config', 'localization_imu_pre_rov.yaml')
+    navsat_config = os.path.join(pkg_share, 'config', 'navsat.yaml')
 
     rviz_flag  = LaunchConfiguration('rviz').perform(context).lower() in ('true', '1', 'yes')
     use_dock   = LaunchConfiguration('dock').perform(context).lower() in ('true', '1', 'yes')
@@ -136,6 +137,19 @@ def launch_setup(context, *args, **kwargs):
             }],
             condition=IfCondition(LaunchConfiguration('dock'))
         ),
+
+        Node(
+            package='robot_localization',
+            executable='navsat_transform_node',
+            name='navsat_transform_node',
+            output='screen',
+            parameters=[navsat_config, {'use_sim_time': sim_time}],
+            remappings=[
+                ('imu',           '/dvl/imu'),
+                ('gps/fix',            'fix'),
+                ('odometry/filtered',  'odometry/filtered'),
+            ],
+        ),
     ]
 
 
@@ -147,7 +161,7 @@ def generate_launch_description():
                               description='true = full bag, false = cropped bag'),
         DeclareLaunchArgument('rviz',      default_value='true',
                               description='open rviz window'),
-        DeclareLaunchArgument('sim_time',  default_value='false',
+        DeclareLaunchArgument('sim_time',  default_value='true',
                               description='use sim_time'),
         DeclareLaunchArgument('dock',      default_value='false',
                               description='show dry dock model'),

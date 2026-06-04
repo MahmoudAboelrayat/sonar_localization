@@ -1,7 +1,7 @@
 localization_imu_pre:
   ros__parameters:
     is_ned: false
-    ekf_z: false
+    ekf_z: true
     loop_ekf_z: false
     ekf_max_age: 0.1
 
@@ -16,12 +16,12 @@ localization_imu_pre:
       depth_sub: "/depth_odom"
 
     tuning:
-      map_res: 0.1
+      map_res: 0.2
       vgicp_threads: 8
       vgicp_epsilon: 1e-4
       vgicp_max_dist: 1.0
       vgicp_max_iter: 100
-      vgicp_resolution: 0.1
+      vgicp_resolution: 0.4
       max_lost_frames: 40
 
     radius_outlier_removal:
@@ -55,6 +55,7 @@ localization_imu_pre:
       imu2base_y: 0.0
       imu2base_z: 0.0
 
+
       # DVL lever arm — translation from base_link to dvl_link in body frame
       # Used to remove the ω×r velocity component from DVL readings.
       # Set to (0,0,0) to disable correction.
@@ -64,19 +65,19 @@ localization_imu_pre:
 
     keyframe:
       submap_size: 30
-      dist_thresh: 0.3
-      angle_thresh: 3.0        # degrees
+      dist_thresh: 0.8
+      angle_thresh: 8.0        # degrees
 
     loop_closure:
-      use_lc: false
-      search_radius: 4.0
+      use_lc: true
+      search_radius: 15.0
       fitness_score: 0.2
-      history_gap: 20
+      history_gap: 40
       submap_size: 10
       vgicp_epsilon: 1e-4
-      vgicp_max_dist: 1.0
+      vgicp_max_dist: 0.8
       vgicp_max_iter: 100
-      vgicp_resolution: 0.05
+      vgicp_resolution: 0.3
       use_ndt: false
       ndt_resolution: 1.0
       ndt_step_size: 1.0
@@ -92,7 +93,7 @@ localization_imu_pre:
       odom_noise_yaw: 0.0125
 
     imu:
-      use_imu: true            # set true to enable IMU preintegration
+      use_imu: false            # set true to enable IMU preintegration
       start_kf: 20              # keyframes to wait before activating ImuFactor (GICP warms up first)
       accel_noise: 6.5e-4          # accelerometer white noise [m/s^2/sqrt(Hz)]
       gyro_noise:  8.7e-5           # gyroscope white noise [rad/s/sqrt(Hz)]
@@ -113,7 +114,7 @@ localization_imu_pre:
       noise_yaw: 0.1            # sigma [rad] for yaw (~6°) — reserved for future use
 
     depth:
-      use_depth: true          # set true to enable depth factor from depth_odom topic
+      use_depth: false          # set true to enable depth factor from depth_odom topic
       noise: 0.05              # sigma [m] — typical pressure sensor ±5 cm
 
     dvl:

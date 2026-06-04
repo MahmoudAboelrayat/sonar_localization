@@ -12,8 +12,8 @@ class ImuNoiseBridge(Node):
         super().__init__("imu_noise_bridge")
         self.get_logger().info("IMU Noise Bridge Started")
         # self.declare_parameter('imu_raw_topic', '/BlueROV2_Heavy/mavros/imu/data_raw')
-        self.declare_parameter('imu_topic', '/mavros/imu/data')
-        self.declare_parameter('output_topic','/imu/data')
+        self.declare_parameter('imu_topic', '/imu/data')
+        self.declare_parameter('output_topic','/imu/data_cov')
         self.output_topic = self.get_parameter('output_topic').get_parameter_value().string_value
         self.imu_topic = self.get_parameter('imu_topic').get_parameter_value().string_value
 
@@ -22,10 +22,10 @@ class ImuNoiseBridge(Node):
         # Publishing noisy IMU for the EKF
         self.pub = self.create_publisher(Imu, self.output_topic, 10)
 
-        self.declare_parameter('frame_id', 'sam_auv_v1/imu_link')
+        self.declare_parameter('frame_id', 'imu_link_ned')
         self.frame_id = self.get_parameter('frame_id').get_parameter_value().string_value
         
-        self.declare_parameter('add_noise', True)
+        self.declare_parameter('add_noise', False)
         self.add_noise = self.get_parameter('add_noise').get_parameter_value().bool_value
 
         # CONFIGURATION: Set your noise levels (Standard Deviations)
@@ -76,6 +76,7 @@ class ImuNoiseBridge(Node):
         else:
             noisy_msg.linear_acceleration =msg.linear_acceleration
             noisy_msg.orientation = msg.orientation
+            noisy_msg.angular_velocity = msg.angular_velocity
 
         # 4. UPDATE COVARIANCES (Variance = sigma^2)
         # Orientation covariance [roll, pitch, yaw]

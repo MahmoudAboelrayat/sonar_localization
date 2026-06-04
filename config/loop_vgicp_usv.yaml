@@ -3,31 +3,30 @@ odom_vgicp:
     is_ned: false
     ekf_z: true
     loop_ekf_z: true
-    ekf_max_age: 0.1
+    ekf_max_age: 0.2
 
     topics:
       odom_pub: "vgicp_odom"
-      pc_sub: "/sonar/point_cloud"
-      deadreckoining_sub: "/odometry/filtered"
+      pc_sub: "/usv/point_cloud"
+      deadreckoining_sub: "/imu/odometry"
       map_pub: "vgicp_global_map"
    
     tuning:
-      map_res: 0.2    
-      vgicp_threads: 8
+      map_res: 0.1    
+      vgicp_threads: 6   
       vgicp_epsilon: 1e-4
-      vgicp_max_dist: 2.0
+      vgicp_max_dist: 0.2
       vgicp_max_iter: 100    
-      vgicp_resolution: 0.3
-      vgicp_k_correspondences: 20   # neighbors for covariance estimation (small_gicp)
+      vgicp_resolution: 0.1
       max_lost_frames: 40
 
     radius_outlier_removal:
-      filter_radius_outliers: true
+      filter_radius_outliers: false
       radius_search: 0.2
       min_neighbors_in_radius: 30
 
     outlier_removal:
-      filter_outliers: true
+      filter_outliers: false
       num_neighbors: 30
       stddev_mul_thresh: 0.7
       # stddev_mul_thresh: 1.0
@@ -39,38 +38,43 @@ odom_vgicp:
     
 
     tf:
-      sonar2base_x: -0.007
-      sonar2base_y: -0.143
-      sonar2base_z: 0.413
+      sonar2base_x: -0.111
+      sonar2base_y: 0.000
+      sonar2base_z: 0.249
       sonar2base_roll: 0.0
-      sonar2base_pitch: 22.5  # degrees (- down / + up)
+      sonar2base_pitch: 30.0  # degrees (- down / + up)
       sonar2base_yaw: 0.0
 
     keyframe:
       submap_size:   30      
-      dist_thresh:   1.0
-      angle_thresh:  8.0    # degrees 
+      dist_thresh:   0.5
+      angle_thresh:  5.0    # degrees 
 
 
     loop_closure:
       search_radius: 15.0
-      fitness_score: 0.1
+      fitness_score: 0.2 #0.7
       history_gap: 20
       submap_size: 10
       vgicp_epsilon: 1e-4
-      vgicp_max_dist: 3.00
+      vgicp_max_dist: 4.0 #working 3.0
       vgicp_max_iter: 100
       vgicp_resolution: 0.3
-      vgicp_k_correspondences: 30
+      # NDT alternative (better for large drift at loop closure)
+      use_ndt:        false
+      ndt_resolution: 1.0   # voxel cell size [m]
+      ndt_step_size:  1.0
+      ndt_max_iter:   150
+      ndt_epsilon:    0.01
 
     gtsam:
-      odom_noise_x: 0.0220
-      odom_noise_y: 0.0220
+      odom_noise_x: 0.0120
+      odom_noise_y: 0.0120
       odom_noise_z: 0.001
       odom_noise_roll: 0.001
       odom_noise_pitch: 0.001
-      odom_noise_yaw: 0.0225
+      odom_noise_yaw: 0.0125
 
     frames:
-      odom_frame: "icp_map"
-      base_frame: "dvl_link"
+      odom_frame: "odom"
+      base_frame: "base_link"
