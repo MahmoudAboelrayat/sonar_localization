@@ -6,7 +6,7 @@ ekf_local:
 
     map_frame: "icp_map"
     odom_frame: "ekf_odom"
-    base_link_frame: "dvl_link"
+    base_link_frame: "base_link"
     world_frame: "ekf_odom"    
 
     # IMU (Angular Velocity & Linear Accel)
@@ -43,7 +43,7 @@ ekf_global:
 
     map_frame: "icp_map"
     odom_frame: "ekf_odom"
-    base_link_frame: "dvl_link"
+    base_link_frame: "base_link"
     world_frame: "icp_map"  
 
     imu0: "/dvl/imu"

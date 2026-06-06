@@ -10,7 +10,7 @@ from launch.conditions import IfCondition
 
 def launch_setup(context, *args, **kwargs):
     pkg_share = get_package_share_directory('sonar_localization')
-    ekf_config_path = os.path.join(pkg_share, 'config', 'ekf_loop.yaml')
+    ekf_config_path = os.path.join(pkg_share, 'config', 'ekf_usv.yaml')
 
     rviz_flag  = LaunchConfiguration('rviz').perform(context).lower() in ('true', '1', 'yes')
     use_dock = LaunchConfiguration('dock').perform(context).lower() in ('true', '1', 'yes')
@@ -34,7 +34,7 @@ def launch_setup(context, *args, **kwargs):
     #         vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_small_vgicp_rov.yaml')
     #     else:
     #         vgicp_config_path = os.path.join(pkg_share, 'config', 'vgicp_tank.yaml')
-    vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_vgicp_usv.yaml')
+    vgicp_config_path = os.path.join(pkg_share, 'config', 'usv_localization.yaml')
     icp_executable = 'loopclosure_samll_vgicp' if gicp_backend == 'small' else 'loopclosure_vgicp'
 
     return [
@@ -94,8 +94,8 @@ def launch_setup(context, *args, **kwargs):
         #     package='tf2_ros',
         #     executable='static_transform_publisher',
         #     name='Beckholmen_tf',
-        #     arguments=['0', '0', '0', '0.0', '0', '3.14159265359', 'world', 'Beckholmen'],
-        #     parameters=[{'use_sim_time': sim_time}]),
+        #     arguments=['0', '0', '0', '0.0', '0', '3.14159265359', 'odom', 'odom_frd'],
+        #     parameters=[{'use_sim_time': True}]),
 
         # Node(
         #     package='tf2_ros',
@@ -112,13 +112,23 @@ def launch_setup(context, *args, **kwargs):
         #     parameters=[{'use_sim_time': sim_time}]
         # ),
 
-        # Node(
-        #     package='tf2_ros',
-        #     executable='static_transform_publisher',
-        #     name='base_link_to_dvl',
-        #     arguments=['-0.150', '-0.150', '0.150', '0.0', '0.0', '0.0', 'base_link', 'bluerov2/dvl_imu'],
-        #     parameters=[{'use_sim_time': sim_time}]
-        # ),
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_sonar',
+            arguments=['0.38', '0.08', '-0.525', '0.0', '0.52', '3.14159', 'base_link', 'usv/sonar_link'],
+            parameters=[{'use_sim_time': True}]
+        ),
+
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_imu',
+            arguments=['0.0', '0.0', '0.0', '0.0', '0.0', '3.1415', 'base_link', 'imu_link_ned'],
+            parameters=[{'use_sim_time': True}]
+        ),
+
+
 
 
         # Node(
@@ -151,10 +161,12 @@ def launch_setup(context, *args, **kwargs):
         Node(
             package='sonar_localization',
             executable=icp_executable,
-            name='odom_vgicp',
+            name='localization_imu_pre',
             output='screen',
             parameters=[vgicp_config_path]
         ),
+
+        
 
         Node(
             package='robot_localization',
@@ -163,9 +175,9 @@ def launch_setup(context, *args, **kwargs):
             output='screen',
             parameters=[{'use_sim_time': True}, ekf_config_path],
             remappings=[
-                ('/gps/fix', '/fix'),     # Map to your SBG topic
-                ('imu', '/mavros/imu/data'),            # Map to your IMU topic
-                ('odometry/filtered', '/odometry/filtered')
+                ('/gps/fix', '/imu/nav_sat_fix'),     # Map to your SBG topic
+                ('imu', 'imu/data'),            # Map to your IMU topic
+                ('odometry/filtered', 'imu/odometry')
             ]
         ),
         
@@ -186,7 +198,7 @@ def launch_setup(context, *args, **kwargs):
             executable='ekf_node',
             name='ekf_local',
             output='screen',
-            parameters=[ekf_config, {'use_sim_time': sim_time}],
+            parameters=[ekf_config_path, {'use_sim_time': sim_time}],
         ),
 
         Node(

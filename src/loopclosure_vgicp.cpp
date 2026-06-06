@@ -103,25 +103,25 @@ public:
         gicp_max_correction_angle_ = this->declare_parameter<double>("tuning.gicp_max_correction_angle", 15.0);
 
         // Extrinsics: translation + RPY in degrees (sonar -> base)
-        double s2b_t_x   = this->declare_parameter<double>("tf.sonar2base_x",      -0.545);
-        double s2b_t_y   = this->declare_parameter<double>("tf.sonar2base_y",       0.000);
-        double s2b_t_z   = this->declare_parameter<double>("tf.sonar2base_z",      -0.404);
-        double s2b_roll  = this->declare_parameter<double>("tf.sonar2base_roll",    0.0);
-        double s2b_pitch = this->declare_parameter<double>("tf.sonar2base_pitch",  -30.0);
-        double s2b_yaw   = this->declare_parameter<double>("tf.sonar2base_yaw",     0.0);
+        double b2s_t_x   = this->declare_parameter<double>("tf.base2sonar_x",      -0.545);
+        double b2s_t_y   = this->declare_parameter<double>("tf.base2sonar_y",       0.000);
+        double b2s_t_z   = this->declare_parameter<double>("tf.base2sonar_z",      -0.404);
+        double b2s_roll  = this->declare_parameter<double>("tf.base2sonar_roll",    0.0);
+        double b2s_pitch = this->declare_parameter<double>("tf.base2sonar_pitch",  -30.0);
+        double b2s_yaw   = this->declare_parameter<double>("tf.base2sonar_yaw",     0.0);
 
         Eigen::Quaternionf rotation_sb;
-        rotation_sb = Eigen::AngleAxisf(static_cast<float>(s2b_yaw   * M_PI / 180.0), Eigen::Vector3f::UnitZ())
-                    * Eigen::AngleAxisf(static_cast<float>(s2b_pitch  * M_PI / 180.0), Eigen::Vector3f::UnitY())
-                    * Eigen::AngleAxisf(static_cast<float>(s2b_roll   * M_PI / 180.0), Eigen::Vector3f::UnitX());
+        rotation_sb = Eigen::AngleAxisf(static_cast<float>(b2s_yaw   * M_PI / 180.0), Eigen::Vector3f::UnitZ())
+                    * Eigen::AngleAxisf(static_cast<float>(b2s_pitch  * M_PI / 180.0), Eigen::Vector3f::UnitY())
+                    * Eigen::AngleAxisf(static_cast<float>(b2s_roll   * M_PI / 180.0), Eigen::Vector3f::UnitX());
 
-        sonar2base_ = Eigen::Matrix4f::Identity();
-        sonar2base_.block<3,3>(0,0) = rotation_sb.toRotationMatrix();
-        sonar2base_.block<3,1>(0,3) = Eigen::Vector3f(
-            static_cast<float>(s2b_t_x),
-            static_cast<float>(s2b_t_y),
-            static_cast<float>(s2b_t_z));
-        base2sonar_ = sonar2base_.inverse();
+        base2sonar_ = Eigen::Matrix4f::Identity();
+        base2sonar_.block<3,3>(0,0) = rotation_sb.toRotationMatrix();
+        base2sonar_.block<3,1>(0,3) = Eigen::Vector3f(
+            static_cast<float>(b2s_t_x),
+            static_cast<float>(b2s_t_y),
+            static_cast<float>(b2s_t_z));
+        sonar2base_ = base2sonar_.inverse();
 
         ned_transform_ << 0, -1,  0, 0,
                           1,  0,  0, 0,
@@ -130,7 +130,7 @@ public:
 
         RCLCPP_INFO(get_logger(),
             "Sonar->Base extrinsics: t=[%.3f, %.3f, %.3f] rpy=[%.1f, %.1f, %.1f] deg",
-            s2b_t_x, s2b_t_y, s2b_t_z, s2b_roll, s2b_pitch, s2b_yaw);
+            b2s_t_x, b2s_t_y, b2s_t_z, b2s_roll, b2s_pitch, b2s_yaw);
 
         // --- Publishers ---
         odom_pub_       = this->create_publisher<nav_msgs::msg::Odometry>       (odom_pub_topic,    10);

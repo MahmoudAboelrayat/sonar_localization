@@ -84,6 +84,38 @@ def launch_setup(context, *args, **kwargs):
         #     parameters=[{'use_sim_time': sim_time}]
         # ),
 
+         Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_sonar',
+            arguments=['0.165', '0.037', '-0.114', '0.0', '-0.3926991', '0.0', 'base_link', 'sonar_link'],
+            output='screen',
+        ),
+
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_camera',
+            arguments=['0.165', '-0.052', '-0.114', '1.5707963', '0.0', '1.1780972', 'base_link', 'hd_camera_link'],
+            output='screen',
+        ),
+
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_dvl',
+            arguments=['0.0', '-0.106', '0.265', '0.0', '0.0', '0.0', 'base_link', 'dvl_link'],
+            output='screen',
+        ),
+
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_gss',
+            arguments=['0.0', '-0.106', '-0.2', '0.0', '0.0', '0.0', 'base_link', 'gnss'],
+            output='screen',
+        ),
+
         #### Map TF ####
         Node(
             package='sonar_localization',

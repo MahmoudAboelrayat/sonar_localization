@@ -70,8 +70,8 @@ public:
     gtsam::Vector evaluateError(
         const gtsam::Pose3 & pose,
         const gtsam::Vector3 & vel_world,
-        gtsam::OptionalMatrixType H1 = nullptr,
-        gtsam::OptionalMatrixType H2 = nullptr) const override
+        boost::optional<gtsam::Matrix&> H1 = boost::none,
+        boost::optional<gtsam::Matrix&> H2 = boost::none) const override
     {
         // Rotate world velocity into body frame: v_body_est = R^T * v_world
         gtsam::Matrix3 R    = pose.rotation().matrix();
@@ -136,8 +136,8 @@ public:
     gtsam::Vector evaluateError(
         const gtsam::Pose3 & pose_i,
         const gtsam::Pose3 & pose_j,
-        gtsam::OptionalMatrixType H1 = nullptr,
-        gtsam::OptionalMatrixType H2 = nullptr) const override
+        boost::optional<gtsam::Matrix&> H1 = boost::none,
+        boost::optional<gtsam::Matrix&> H2 = boost::none) const override
     {
         Eigen::Matrix3d Ri  = pose_i.rotation().matrix();
         Eigen::Matrix3d Rj  = pose_j.rotation().matrix();
@@ -181,7 +181,7 @@ public:
 
     gtsam::Vector evaluateError(
         const gtsam::Pose3 & pose,
-        gtsam::OptionalMatrixType H = nullptr) const override
+        boost::optional<gtsam::Matrix&> H = boost::none) const override
     {
         if (H) {
             *H = (gtsam::Matrix16() << 0, 0, 0, 0, 0, 1).finished();
@@ -234,16 +234,22 @@ public:
         base_frame_    = this->declare_parameter<std::string>("frames.base_frame", "sam_auv_v1/base_link");
         min_intensity = static_cast<float>(this->declare_parameter<double>("tuning.min_intensity", 0.0));
         is_ned_        = this->declare_parameter<bool>("is_ned", false);
+        use_ekf_       = this->declare_parameter<bool>("use_ekf", true);
         ekf_z_         = this->declare_parameter<bool>("ekf_z", false);
         loop_ekf_z_    = this->declare_parameter<bool>("loop_ekf_z", false);
         ekf_max_age_   = this->declare_parameter<double>("ekf_max_age", 0.1);
 
+        debug = this->declare_parameter<bool>("debug", false);
+
         submap_size_     = this->declare_parameter<int>   ("keyframe.submap_size",  20);
         kf_dist_thresh_  = this->declare_parameter<double>("keyframe.dist_thresh",  0.5);
         kf_angle_thresh_ = this->declare_parameter<double>("keyframe.angle_thresh", 10.0);
+        kf_min_dt_       = this->declare_parameter<double>("keyframe.min_dt", 0.3);
 
-        lc_search_radius_ = this->declare_parameter<double>("loop_closure.search_radius", 10.0);
-        lc_fitness_score_ = this->declare_parameter<double>("loop_closure.fitness_score", 0.3);
+        lc_search_radius_        = this->declare_parameter<double>("loop_closure.search_radius",        10.0);
+        lc_fitness_score_        = this->declare_parameter<double>("loop_closure.fitness_score",        0.3);
+        lc_max_correction_dist_  = this->declare_parameter<double>("loop_closure.max_correction_dist",  3.0);
+        lc_max_correction_angle_ = this->declare_parameter<double>("loop_closure.max_correction_angle", 30.0);
         lc_history_gap_   = this->declare_parameter<int>   ("loop_closure.history_gap",   10);
         lc_submap_size_   = this->declare_parameter<int>   ("loop_closure.submap_size",   7);
 
@@ -398,6 +404,28 @@ public:
         lc_noise_z_       = this->declare_parameter<double>("gtsam.lc_noise_z",       0.05);
         lc_huber_k_       = this->declare_parameter<double>("gtsam.lc_huber_k",       1.0);
 
+        // Visual odometry factor
+        use_vo_           = this->declare_parameter<bool>  ("vo.use_vo",       false);
+        vo_max_delta_     = this->declare_parameter<double>("vo.max_delta",     2.0);   // max translation between KFs [m]
+        vo_reset_thresh_  = this->declare_parameter<double>("vo.reset_thresh",  0.05);  // position norm below this → reset
+        {
+            double nx = this->declare_parameter<double>("vo.noise_x",     0.05);
+            double ny = this->declare_parameter<double>("vo.noise_y",     0.05);
+            double nz = this->declare_parameter<double>("vo.noise_z",     0.1);
+            double nr = this->declare_parameter<double>("vo.noise_roll",  0.01);
+            double np = this->declare_parameter<double>("vo.noise_pitch", 0.01);
+            double nyw= this->declare_parameter<double>("vo.noise_yaw",   0.05);
+            voNoise_ = gtsam::noiseModel::Diagonal::Sigmas(
+                (gtsam::Vector(6) << nr, np, nyw, nx, ny, nz).finished());
+        }
+        if (use_vo_) {
+            std::string vo_topic = this->declare_parameter<std::string>("topics.vo_sub", "/odometry/visual");
+            vo_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+                vo_topic, 10,
+                std::bind(&GicpOdomNode::voCallback, this, std::placeholders::_1));
+            RCLCPP_INFO(get_logger(), "Visual odometry factor enabled on %s", vo_topic.c_str());
+        }
+
         // IMU parameters
         std::string imu_topic = this->declare_parameter<std::string>("topics.imu_sub", "/imu/data");
         imu_accel_noise_  = this->declare_parameter<double>("imu.accel_noise",       0.05);
@@ -422,6 +450,9 @@ public:
         dvl_noise_z_  = this->declare_parameter<double>("dvl.noise_z",  0.05);
         use_dvl_       = this->declare_parameter<bool>("dvl.use_dvl",       false);
         use_dvl_trans_ = this->declare_parameter<bool>("dvl.use_dvl_trans", false);
+        dvl_max_vel_   = this->declare_parameter<double>("dvl.max_vel", 3.0);  // reject readings above this [m/s]
+        imu_max_accel_ = this->declare_parameter<double>("imu.max_accel", 50.0);  // reject spikes above this [m/s^2]
+        imu_max_gyro_  = this->declare_parameter<double>("imu.max_gyro",  10.0);  // reject spikes above this [rad/s]
 
         // DVL translation factor noise (pre-integrated position constraint between keyframes)
         double dvl_trans_nx = this->declare_parameter<double>("dvl.trans_noise_x", 0.1);
@@ -477,7 +508,8 @@ public:
             imu_p->accelerometerCovariance = gtsam::I_3x3 * imu_accel_noise_ * imu_accel_noise_;
             imu_p->gyroscopeCovariance     = gtsam::I_3x3 * imu_gyro_noise_  * imu_gyro_noise_;
             imu_p->integrationCovariance   = gtsam::I_3x3 * 1e-6;
-            preint_ = std::make_shared<gtsam::PreintegratedImuMeasurements>(imu_p, gtsam::imuBias::ConstantBias());
+            preint_      = std::make_shared<gtsam::PreintegratedImuMeasurements>(imu_p, gtsam::imuBias::ConstantBias());
+            scan_preint_ = std::make_shared<gtsam::PreintegratedImuMeasurements>(imu_p, gtsam::imuBias::ConstantBias());
 
             auto imu_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
             rclcpp::SubscriptionOptions imu_sub_opt;
@@ -610,7 +642,8 @@ private:
     // ── Keyframe management ───────────────────────────────────────────────────
     void AddKeyFrame(const Eigen::Matrix4f & current_pose,
                      pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
-                     float ekf_z = 0.0f)
+                     float ekf_z = 0.0f,
+                     double stamp_sec = 0.0)
     {
         // Check keyframe threshold — quick check without GTSAM lock
         {
@@ -623,6 +656,9 @@ private:
                 if (dist <= kf_dist_thresh_ && angle <= kf_angle_thresh_) return;
             }
         }
+        // Enforce minimum time between keyframes so sensors (DVL) have time to accumulate
+        if (stamp_sec > 0.0 && (stamp_sec - last_kf_time_) < kf_min_dt_) return;
+        last_kf_time_ = stamp_sec;
 
         // Always lock gtsam_mutex_ BEFORE kf_mutex_
         std::lock_guard<std::mutex> gtsam_lock(gtsam_mutex_);
@@ -650,9 +686,11 @@ private:
                     double y = current_gtsam_pose.rotation().yaw();
                     gtsam::Rot3 init_rot = gtsam::Rot3::RzRyRx(r, p, y);
                     current_gtsam_pose = gtsam::Pose3(init_rot, current_gtsam_pose.translation());
-                    RCLCPP_INFO(get_logger(),
-                        "[Bootstrap] AHRS seed: roll=%.2f°  pitch=%.2f°  yaw=%.2f°",
-                        r * 180.0 / M_PI, p * 180.0 / M_PI, y * 180.0 / M_PI);
+                    if(debug){
+                        RCLCPP_INFO(get_logger(),
+                            "[Bootstrap] AHRS seed: roll=%.2f°  pitch=%.2f°  yaw=%.2f°",
+                            r * 180.0 / M_PI, p * 180.0 / M_PI, y * 180.0 / M_PI);
+                    }
                 } else {
                     RCLCPP_WARN(get_logger(),
                         "[Bootstrap] No AHRS data yet — X(0) starts with identity roll/pitch. ");
@@ -692,28 +730,31 @@ private:
                         X(current_id-1), V(current_id-1),
                         X(current_id),   V(current_id),
                         B(current_id-1), *preint_));
-                    gtsam::Vector3 dv = preint_->deltaVij();
-                    gtsam::Vector3 v_init = prev_velocity_ + dv;
-                    RCLCPP_INFO(get_logger(),
-                        "[IMU factor] kf=%d  dt=%.3fs  "
-                        "deltaV=[%.4f, %.4f, %.4f]  "
-                        "V_seed=[%.4f, %.4f, %.4f]  m/s",
-                        current_id, preint_->deltaTij(),
-                        dv.x(), dv.y(), dv.z(),
-                        v_init.x(), v_init.y(), v_init.z());
+                    if (debug) {
+                        gtsam::Vector3 dv = preint_->deltaVij();
+                        RCLCPP_INFO(get_logger(),
+                            "[IMU factor] kf=%d  dt=%.3fs  "
+                            "deltaVij=[%.4f, %.4f, %.4f] m/s  "
+                            "prev_vel=[%.4f, %.4f, %.4f] m/s",
+                            current_id, preint_->deltaTij(),
+                            dv.x(), dv.y(), dv.z(),
+                            prev_velocity_.x(), prev_velocity_.y(), prev_velocity_.z());
+                    }
                     used_imu_factor = true;
                 }
             } else if (use_imu_ && current_id < imu_start_kf_) {
-                RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
-                    "[IMU warmup] kf=%d/%d — using GICP odometry until pose is reliable",
-                    current_id, imu_start_kf_);
+                if (debug) {
+                    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
+                        "[IMU warmup] kf=%d/%d — using GICP odometry until pose is reliable",
+                        current_id, imu_start_kf_);
+                }
             }
 
             gtsam::Pose3 prev_gtsam = matrix2Pose3(keyframes_.back().pose);
             gtsam::Pose3 relative   = prev_gtsam.between(current_gtsam_pose);
             gtSAMgraph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
                 X(current_id-1), X(current_id), relative, odomNoise_));
-            {
+            if (debug) {
                 gtsam::Vector3 dt = relative.translation();
                 gtsam::Vector3 rpy = relative.rotation().rpy();
                 RCLCPP_INFO(get_logger(),
@@ -777,10 +818,12 @@ private:
                 if (dvl_ok) {
                     gtSAMgraph_.add(DvlVelocityFactor(
                         X(current_id), V(current_id), dvl_snap, dvlNoise_));
-                    RCLCPP_INFO(get_logger(),
-                        "[DVL vel factor] kf=%d  body-vel=[%.4f, %.4f, %.4f] m/s",
-                        current_id, dvl_snap.x(), dvl_snap.y(), dvl_snap.z());
-                } else {
+                    if (debug) {
+                        RCLCPP_INFO(get_logger(),
+                            "[DVL vel factor] kf=%d  body-vel=[%.4f, %.4f, %.4f] m/s",
+                            current_id, dvl_snap.x(), dvl_snap.y(), dvl_snap.z());
+                    }
+                } else if (debug) {
                     RCLCPP_WARN(get_logger(),
                         "[DVL vel factor] kf=%d  skipped — no DVL measurement yet", current_id);
                 }
@@ -803,11 +846,13 @@ private:
                             X(current_id - 1), X(current_id),
                             preint_dp, R_ID_, R_DC_, D_pDC_,
                             dvlTransNoise_));
-                        RCLCPP_INFO(get_logger(),
-                            "[DVL trans factor] kf=%d  preint_dp=[%.4f, %.4f, %.4f] m",
-                            current_id,
-                            preint_dp.x(), preint_dp.y(), preint_dp.z());
-                    } else {
+                        if (debug) {
+                            RCLCPP_INFO(get_logger(),
+                                "[DVL trans factor] kf=%d  preint_dp=[%.4f, %.4f, %.4f] m",
+                                current_id,
+                                preint_dp.x(), preint_dp.y(), preint_dp.z());
+                        }
+                    } else if (debug) {
                         RCLCPP_WARN(get_logger(),
                             "[DVL trans factor] kf=%d  skipped — insufficient pre-integration dt",
                             current_id);
@@ -837,11 +882,11 @@ private:
                     // nRef    = gravity direction in world   = (0,0,1) for Z-down
                     // bMeasured = gravity direction in body  = R_wb^T * (0,0,1)
                     gtsam::Unit3 g_body(ahrs_snap.transpose() * gtsam::Vector3(0, 0, 1));
-                    gtSAMgraph_.add(gtsam::AttitudeFactor<gtsam::Pose3>(
+                    gtSAMgraph_.add(gtsam::Pose3AttitudeFactor(
                         X(current_id),
-                        gtsam::Unit3(0, 0, 1),  // nRef  — gravity in world (Z-down)
+                        gtsam::Unit3(0, 0, 1),  // nZ    — gravity direction in world (Z-down)
                         ahrsNoise_,              // noise model
-                        g_body));                // bMeasured — gravity in body frame
+                        g_body));                // bRef  — gravity direction in body frame
                 }
             }
 
@@ -855,11 +900,63 @@ private:
                 }
                 if (depth_ok) {
                     gtSAMgraph_.add(DepthFactor(X(current_id), depth_snap, depthNoise_));
-                    RCLCPP_INFO(get_logger(),
-                        "[Depth factor] kf=%d  z=%.4f m", current_id, depth_snap);
-                } else {
+                    if (debug) {
+                        RCLCPP_INFO(get_logger(),
+                            "[Depth factor] kf=%d  z=%.4f m", current_id, depth_snap);
+                    }
+                } else if (debug) {
                     RCLCPP_WARN(get_logger(),
                         "[Depth factor] kf=%d  skipped — no depth measurement yet", current_id);
+                }
+            }
+
+            // ── Visual odometry factor ───────────────────────────────────────
+            if (use_vo_ && current_id > 0) {
+                Eigen::Matrix4f vo_snap;
+                bool vo_ok = false;
+                bool reset_flag = false;
+                {
+                    std::lock_guard<std::mutex> lk(vo_mutex_);
+                    reset_flag = vo_reset_pending_;
+                    vo_reset_pending_ = false;
+                    if (has_vo_) { vo_snap = latest_vo_pose_; vo_ok = true; }
+                }
+                if (reset_flag) {
+                    if (debug) {
+                        RCLCPP_WARN(get_logger(),
+                            "[VO factor] kf=%d  skipped — VO reset between keyframes", current_id);
+                    }
+                    prev_vo_pose_valid_ = false;
+                } else if (vo_ok && prev_vo_pose_valid_) {
+                    // Relative delta in VO frame — frame-origin-independent
+                    Eigen::Matrix4f vo_delta = prev_vo_pose_.inverse() * vo_snap;
+                    float delta_t = vo_delta.block<3,1>(0,3).norm();
+                    if (delta_t > static_cast<float>(vo_max_delta_)) {
+                        if (debug) {
+                            RCLCPP_WARN(get_logger(),
+                                "[VO factor] kf=%d  skipped — delta too large (%.2fm)", current_id, delta_t);
+                        }
+                        prev_vo_pose_valid_ = false;
+                    } else {
+                        gtsam::Pose3 relative = matrix2Pose3(vo_delta);
+                        gtSAMgraph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
+                            X(current_id-1), X(current_id), relative, voNoise_));
+                        if (debug) {
+                            RCLCPP_INFO(get_logger(),
+                                "[VO factor] kf=%d  dt=[%.3f, %.3f, %.3f] m",
+                                current_id,
+                                vo_delta(0,3), vo_delta(1,3), vo_delta(2,3));
+                        }
+                    }
+                } else if (!prev_vo_pose_valid_ && vo_ok) {
+                    if (debug) {
+                        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
+                            "[VO factor] waiting for two consecutive valid VO poses");
+                    }
+                }
+                if (vo_ok && !reset_flag) {
+                    prev_vo_pose_       = vo_snap;
+                    prev_vo_pose_valid_ = true;
                 }
             }
         }
@@ -924,7 +1021,7 @@ private:
         updateSubmap();
         publishPath();   // grow path normally every keyframe
 
-        RCLCPP_INFO(get_logger(), "Keyframe %d added.", current_id);
+        if (debug) { RCLCPP_INFO(get_logger(), "Keyframe %d added.", current_id); }
     }
 
     // ── Loop closure thread ───────────────────────────────────────────────────
@@ -1007,17 +1104,22 @@ private:
         double          score        = 0.0;
         Eigen::Matrix4f correction   = Eigen::Matrix4f::Identity();
 
+        // // Initial guess: expected transform from latest to history in world frame.
+        // // Using identity assumes no drift; using the pose difference handles larger drift
+        // // and keeps VGICP in the correct basin of attraction.
+        // Eigen::Matrix4f lc_initial_guess = history_pose_world * latest_pose_world.inverse();
+        Eigen::Matrix4f lc_initial_guess = Eigen::Matrix4f::Identity();
         if (lc_use_ndt_) {
             ndt_lc_.setInputTarget(history_ds);
             ndt_lc_.setInputSource(latest_cloud_world);
-            ndt_lc_.align(aligned, Eigen::Matrix4f::Identity());
+            ndt_lc_.align(aligned, lc_initial_guess);
             lc_converged = ndt_lc_.hasConverged();
             score        = ndt_lc_.getFitnessScore();
             correction   = ndt_lc_.getFinalTransformation();
         } else {
             vgicp_lc_.setInputSource(latest_cloud_world);
             vgicp_lc_.setInputTarget(history_ds);
-            vgicp_lc_.align(aligned, Eigen::Matrix4f::Identity());
+            vgicp_lc_.align(aligned, lc_initial_guess);
             lc_converged = vgicp_lc_.hasConverged();
             score        = vgicp_lc_.getFitnessScore();
             correction   = vgicp_lc_.getFinalTransformation();
@@ -1044,12 +1146,14 @@ private:
         }
 
         // Reject if correction is unreasonably large — likely wrong minimum
-        // if (correction_dist > 3.0f || correction_angle > 30.0f) {
-        //     RCLCPP_WARN(get_logger(),
-        //         "Loop closure refused: correction too large (t=%.2fm, angle=%.1fdeg)",
-        //         correction_dist, correction_angle);
-        //     return;
-        // }
+        if (correction_dist > static_cast<float>(lc_max_correction_dist_) ||
+            correction_angle > static_cast<float>(lc_max_correction_angle_)) {
+            RCLCPP_WARN(get_logger(),
+                "Loop closure refused: correction too large (t=%.2fm angle=%.1fdeg) "
+                "— likely wrong minimum",
+                correction_dist, correction_angle);
+            return;
+        }
 
         RCLCPP_WARN(get_logger(), "Loop closure accepted! [%s] Score: %.4f | t=%.2fm | angle=%.1fdeg",
                     lc_matcher, score, correction_dist, correction_angle);
@@ -1198,7 +1302,18 @@ private:
             msg->angular_velocity.x - imu_gyro_bias_x_,
             msg->angular_velocity.y - imu_gyro_bias_y_,
             msg->angular_velocity.z - imu_gyro_bias_z_);
+
+        // Reject spikes — corrupted IMU samples poison preintegration
+        if (accel.norm() > imu_max_accel_ || gyro.norm() > imu_max_gyro_) {
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                "[IMU cb] rejected spike — accel=%.1f m/s^2  gyro=%.1f rad/s",
+                accel.norm(), gyro.norm());
+            imu_last_time_ = t;
+            return;
+        }
+
         preint_->integrateMeasurement(accel, gyro, dt);
+        if (scan_preint_) scan_preint_->integrateMeasurement(accel, gyro, dt);
         imu_last_time_ = t;
 
         // ── Accumulate gyro rotation for DVL pre-integration ─────────────────
@@ -1220,8 +1335,14 @@ private:
                         -w.y()*dt,  w.x()*dt,       0.0;
                 dR_step = Eigen::Matrix3d::Identity() + skew;
             }
-            std::lock_guard<std::mutex> plk(dvl_preint_mutex_);
-            dvl_preint_dR_ = dvl_preint_dR_ * dR_step;
+            {
+                std::lock_guard<std::mutex> plk(dvl_preint_mutex_);
+                dvl_preint_dR_ = dvl_preint_dR_ * dR_step;
+            }
+            {
+                std::lock_guard<std::mutex> dlk(dvl_mutex_);
+                scan_dvl_dR_ = scan_dvl_dR_ * dR_step;
+            }
         }
     }
 
@@ -1240,17 +1361,30 @@ private:
                                  msg->twist.twist.angular.y,
                                  msg->twist.twist.angular.z);
             gtsam::Vector3 lever_vel = omega.cross(r_base2dvl_);
-            RCLCPP_DEBUG(get_logger(),
-                "[DVL lever] omega=[%.4f,%.4f,%.4f] r=[%.3f,%.3f,%.3f] correction=[%.4f,%.4f,%.4f]",
-                omega.x(), omega.y(), omega.z(),
-                r_base2dvl_.x(), r_base2dvl_.y(), r_base2dvl_.z(),
-                lever_vel.x(), lever_vel.y(), lever_vel.z());
+            if(debug){
+                RCLCPP_DEBUG(get_logger(),
+                    "[DVL lever] omega=[%.4f,%.4f,%.4f] r=[%.3f,%.3f,%.3f] correction=[%.4f,%.4f,%.4f]",
+                    omega.x(), omega.y(), omega.z(),
+                    r_base2dvl_.x(), r_base2dvl_.y(), r_base2dvl_.z(),
+                    lever_vel.x(), lever_vel.y(), lever_vel.z());
+            }
             vel -= lever_vel;
         }
+        if(debug){
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                "[DVL cb] body-frame vel (corrected)  x=%.4f  y=%.4f  z=%.4f  m/s",
+                vel.x(), vel.y(), vel.z());
+        }
 
-        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
-            "[DVL cb] body-frame vel (corrected)  x=%.4f  y=%.4f  z=%.4f  m/s",
-            vel.x(), vel.y(), vel.z());
+        // Reject implausibly large readings (beam failures / dropouts)
+        if (vel.norm() > dvl_max_vel_) {
+            if(debug){
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                    "[DVL cb] rejected — speed %.2f m/s exceeds max_vel %.2f m/s",
+                    vel.norm(), dvl_max_vel_);
+            }
+            return;
+        }
 
         // Update velocity latch
         {
@@ -1276,18 +1410,68 @@ private:
         last_dvl_time = now;
 
         if (dt_dvl > 0.001 && dt_dvl < 1.0) {  // sanity: between 1ms and 1s
-            std::lock_guard<std::mutex> plk(dvl_preint_mutex_);
-            // Rotate DVL velocity into the initial DVL frame (at keyframe i)
-            // using accumulated gyro rotation:  ΔR̂_IiIk * R_ID * Di_v
             Eigen::Vector3d v_dvl(vel.x(), vel.y(), vel.z());
-            dvl_preint_dp_ += dvl_preint_dR_ * R_ID_ * v_dvl * dt_dvl;
-            dvl_preint_dt_ += dt_dvl;
-            // Reset accumulated dR after each DVL ping — gyro will accumulate fresh
-            dvl_preint_dR_ = Eigen::Matrix3d::Identity();
+            {
+                std::lock_guard<std::mutex> plk(dvl_preint_mutex_);
+                dvl_preint_dp_ += dvl_preint_dR_ * R_ID_ * v_dvl * dt_dvl;
+                dvl_preint_dt_ += dt_dvl;
+                dvl_preint_dR_ = Eigen::Matrix3d::Identity();
+            }
+            {
+                // Rotate DVL sample into the scan-start body frame before integrating,
+                // same as dvl_preint_dp_ does — closes the gap with EKF quality.
+                std::lock_guard<std::mutex> dlk(dvl_mutex_);
+                Eigen::Vector3f v_rotated = scan_dvl_dR_.cast<float>() * v_dvl.cast<float>();
+                scan_dvl_dp_ += v_rotated * static_cast<float>(dt_dvl);
+                scan_dvl_valid_ = true;
+            }
         }
     }
 
     // ── EKF callback ──────────────────────────────────────────────────────────
+    void voCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
+    {
+        Eigen::Quaternionf q(
+            msg->pose.pose.orientation.w,
+            msg->pose.pose.orientation.x,
+            msg->pose.pose.orientation.y,
+            msg->pose.pose.orientation.z);
+        Eigen::Vector3f t(
+            msg->pose.pose.position.x,
+            msg->pose.pose.position.y,
+            msg->pose.pose.position.z);
+
+        // Reject invalid quaternion — zero-norm → NaN after normalization → SIGFPE
+        if (q.norm() < 1e-6f) {
+            std::lock_guard<std::mutex> lock(vo_mutex_);
+            vo_reset_pending_ = true;
+            if(debug){
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                "[VO] invalid quaternion (norm=%.6f) — treating as reset", q.norm());
+            }
+            return;
+        }
+
+        // Detect reset: VO publishes near-zero position when tracking fails
+        if (t.norm() < static_cast<float>(vo_reset_thresh_)) {
+            std::lock_guard<std::mutex> lock(vo_mutex_);
+            vo_reset_pending_ = true;
+            if(debug){
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                    "[VO] tracking lost / reset detected (pos norm=%.4f)", t.norm());
+            }
+            return;
+        }
+
+        Eigen::Matrix4f pose = Eigen::Matrix4f::Identity();
+        pose.block<3,3>(0,0) = q.normalized().toRotationMatrix();
+        pose.block<3,1>(0,3) = t;
+
+        std::lock_guard<std::mutex> lock(vo_mutex_);
+        latest_vo_pose_ = pose;
+        has_vo_ = true;
+    }
+
     void ekfCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
         Eigen::Quaternionf q(
@@ -1314,27 +1498,32 @@ private:
     // ── Point cloud callback ───────────────────────────────────────────────────
     void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
     {
-        if (!has_ekf_) {
-            RCLCPP_WARN_ONCE(get_logger(), "Waiting for first EKF message...");
-            return;
-        }
-        {
-            std::lock_guard<std::mutex> lock(ekf_mutex_);
-            if (ekf_msg_count_ < min_ekf_msgs_) {
-                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
-                    "Waiting for EKF to converge (%d / %d messages)",
-                    ekf_msg_count_.load(), min_ekf_msgs_);
+        if (use_ekf_) {
+            if (!has_ekf_) {
+                if (debug) { RCLCPP_WARN_ONCE(get_logger(), "Waiting for first EKF message..."); }
                 return;
             }
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(ekf_mutex_);
-            double dt = std::abs((rclcpp::Time(msg->header.stamp) - rclcpp::Time(latest_ekf_stamp_)).seconds());
-            if (dt > ekf_max_age_) {
-                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-                    "EKF message is %.3fs old (threshold %.3fs) — skipping scan", dt, ekf_max_age_);
-                return;
+            {
+                std::lock_guard<std::mutex> lock(ekf_mutex_);
+                if (ekf_msg_count_ < min_ekf_msgs_) {
+                    if (debug) {
+                        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                            "Waiting for EKF to converge (%d / %d messages)",
+                            ekf_msg_count_.load(), min_ekf_msgs_);
+                    }
+                    return;
+                }
+            }
+            {
+                std::lock_guard<std::mutex> lock(ekf_mutex_);
+                double dt = std::abs((rclcpp::Time(msg->header.stamp) - rclcpp::Time(latest_ekf_stamp_)).seconds());
+                if (dt > ekf_max_age_) {
+                    if (debug) {
+                        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                            "EKF message is %.3fs old (threshold %.3fs) — skipping scan", dt, ekf_max_age_);
+                    }
+                    return;
+                }
             }
         }
 
@@ -1389,23 +1578,73 @@ private:
         }
 
         if (map_empty) {
+            Eigen::Matrix4f bootstrap_pose = use_ekf_ ? current_ekf_pose : Eigen::Matrix4f::Identity();
             {
                 std::lock_guard<std::mutex> pose_lock(pose_mutex_);
-                global_pose_ = current_ekf_pose;
+                global_pose_ = bootstrap_pose;
             }
-            prev_ekf_pose_ = current_ekf_pose;
-            AddKeyFrame(current_ekf_pose, filtered, current_ekf_pose(2, 3));
+            if (use_ekf_) prev_ekf_pose_ = current_ekf_pose;
+            AddKeyFrame(bootstrap_pose, filtered, bootstrap_pose(2, 3),
+                        rclcpp::Time(msg->header.stamp).seconds());
             return;
         }
 
-        // 6. Build initial guess from EKF dead-reckoning
+        // 6. Build initial guess
         Eigen::Matrix4f current_global;
         {
             std::lock_guard<std::mutex> pose_lock(pose_mutex_);
             current_global = global_pose_;
         }
-        Eigen::Matrix4f ekf_delta     = prev_ekf_pose_.inverse() * current_ekf_pose;
-        Eigen::Matrix4f initial_guess = current_global * ekf_delta;
+        Eigen::Matrix4f initial_guess;
+        if (use_ekf_) {
+            Eigen::Matrix4f ekf_delta = prev_ekf_pose_.inverse() * current_ekf_pose;
+            initial_guess = current_global * ekf_delta;
+        } else if (use_imu_ && scan_preint_ && scan_preint_->deltaTij() > 0.001) {
+            bool dvl_ok;
+            Eigen::Vector3f dvl_integrated;
+            {
+                std::lock_guard<std::mutex> dlk(dvl_mutex_);
+                dvl_ok       = scan_dvl_valid_;
+                dvl_integrated = scan_dvl_dp_;
+            }
+
+            if (dvl_ok) {
+                // Best case: gyro rotation + integrated DVL translation (full interval, not snapshot)
+                gtsam::Rot3 delta_R;
+                {
+                    std::lock_guard<std::mutex> ilk(imu_mutex_);
+                    delta_R = scan_preint_->deltaRij();
+                }
+                Eigen::Matrix3f R_wb = current_global.block<3,3>(0,0);
+                Eigen::Vector3f t_delta = R_wb * dvl_integrated;
+
+                Eigen::Matrix4f scan_delta = Eigen::Matrix4f::Identity();
+                scan_delta.block<3,3>(0,0) = delta_R.matrix().cast<float>();
+                scan_delta.block<3,1>(0,3) = t_delta;
+                initial_guess = current_global * scan_delta;
+            } else {
+                // DVL dead — use gyro rotation only, zero translation.
+                // Avoids prev_velocity_ contamination; VGICP searches translation freely.
+                if (debug) {
+                    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                        "DVL unavailable — using gyro-rotation-only prediction for initial guess");
+                }
+                gtsam::Rot3 delta_R;
+                {
+                    std::lock_guard<std::mutex> ilk(imu_mutex_);
+                    delta_R = scan_preint_->deltaRij();
+                }
+                Eigen::Matrix4f scan_delta = Eigen::Matrix4f::Identity();
+                scan_delta.block<3,3>(0,0) = delta_R.matrix().cast<float>();
+                initial_guess = current_global * scan_delta;
+            }
+        } else if (has_prev_scan_) {
+            // Constant velocity fallback — IMU not yet running
+            Eigen::Matrix4f delta = prev_scan_pose_.inverse() * current_global;
+            initial_guess = current_global * delta;
+        } else {
+            initial_guess = current_global;  // first scan — zero-motion
+        }
 
         // 7. Snapshot local map
         pcl::PointCloud<pcl::PointXYZ>::Ptr map_snapshot;
@@ -1429,22 +1668,26 @@ private:
             float correction_angle         = Eigen::AngleAxisf(
                 Eigen::Matrix3f(diff.block<3,3>(0,0))).angle() * 180.0f / M_PI;
 
-            RCLCPP_DEBUG(get_logger(),
-                "GICP | score: %.4f | correction: t=%.2fm angle=%.1fdeg | src: %zu | tgt: %zu",
-                vgicp_.getFitnessScore(), correction_dist, correction_angle,
-                filtered->size(), map_snapshot->size());
+            if (debug) {
+                RCLCPP_INFO(get_logger(),
+                    "GICP | score: %.4f | correction: t=%.2fm angle=%.1fdeg | src: %zu | tgt: %zu",
+                    vgicp_.getFitnessScore(), correction_dist, correction_angle,
+                    filtered->size(), map_snapshot->size());
+            }
 
             lost_frames_ = 0;
 
             {
                 std::lock_guard<std::mutex> pose_lock(pose_mutex_);
-                if (ekf_z_) result(2, 3) = current_ekf_pose(2, 3);
+                if (use_ekf_ && ekf_z_) result(2, 3) = current_ekf_pose(2, 3);
                 global_pose_   = result;
                 current_global = result;
             }
             double score = vgicp_.getFitnessScore();
             publishOdometry(msg->header, score, false);
-            AddKeyFrame(current_global, filtered, current_ekf_pose(2, 3));
+            float kf_z = use_ekf_ ? current_ekf_pose(2, 3) : current_global(2, 3);
+            AddKeyFrame(current_global, filtered, kf_z,
+                        rclcpp::Time(msg->header.stamp).seconds());
 
             if (map_pub_count_++ % 5 == 0) {
                 sensor_msgs::msg::PointCloud2 map_msg;
@@ -1457,24 +1700,45 @@ private:
                 global_map_pub_->publish(map_msg);
             }
 
-            prev_ekf_pose_ = current_ekf_pose;
+            if (use_ekf_) prev_ekf_pose_ = current_ekf_pose;
+            prev_scan_pose_ = current_global;
+            has_prev_scan_  = true;
+            if (scan_preint_) {
+                std::lock_guard<std::mutex> ilk(imu_mutex_);
+                scan_preint_ = std::make_shared<gtsam::PreintegratedImuMeasurements>(
+                    scan_preint_->params(), prev_bias_);
+            }
+            {
+                std::lock_guard<std::mutex> dlk(dvl_mutex_);
+                scan_dvl_dp_    = Eigen::Vector3f::Zero();
+                scan_dvl_dR_    = Eigen::Matrix3d::Identity();
+                scan_dvl_valid_ = false;
+            }
 
         } else {
-            RCLCPP_WARN(get_logger(), "Trusting the ekf for frame %d",lost_frames_);
+            if (debug) {
+                RCLCPP_WARN(get_logger(), "VGICP did not converge (lost=%d) — falling back to %s",
+                    lost_frames_, use_ekf_ ? "EKF" : "IMU prediction");
+            }
             if (lost_frames_ < max_lost_frames) {
                 ++lost_frames_;
                 std::lock_guard<std::mutex> pose_lock(pose_mutex_);
-                global_pose_   = initial_guess;
-                prev_ekf_pose_ = current_ekf_pose;
+                global_pose_ = initial_guess;
+                if (use_ekf_) prev_ekf_pose_ = current_ekf_pose;
+                if (scan_preint_) {
+                    std::lock_guard<std::mutex> ilk(imu_mutex_);
+                    scan_preint_ = std::make_shared<gtsam::PreintegratedImuMeasurements>(
+                        scan_preint_->params(), prev_bias_);
+                }
             } else {
                 RCLCPP_WARN(get_logger(), "Tracking lost — restarting SLAM.");
                 lost_frames_ = 0;
 
                 {
                     std::lock_guard<std::mutex> pose_lock(pose_mutex_);
-                    global_pose_ = current_ekf_pose;
+                    global_pose_ = use_ekf_ ? current_ekf_pose : initial_guess;
                 }
-                prev_ekf_pose_ = current_ekf_pose;
+                if (use_ekf_) prev_ekf_pose_ = current_ekf_pose;
 
                 {
                     std::lock_guard<std::mutex> gtsam_lock(gtsam_mutex_);
@@ -1657,9 +1921,11 @@ private:
 
     int    submap_size_{20};
     double map_res_{0.1};
-    double kf_dist_thresh_{0.5}, kf_angle_thresh_{10.0};
+    double kf_dist_thresh_{0.5}, kf_angle_thresh_{10.0}, kf_min_dt_{0.3};
+    double last_kf_time_{0.0};
 
     double lc_search_radius_{10.0}, lc_fitness_score_{0.3};
+    double lc_max_correction_dist_{3.0}, lc_max_correction_angle_{30.0};
     int    lc_history_gap_{10}, lc_submap_size_{7};
     bool   lc_use_ndt_{false};
     bool use_lc_{true};
@@ -1676,7 +1942,24 @@ private:
     bool filter_radius_outliers_;
     bool filter_intensity;
     double min_intensity;
+    bool use_ekf_{true};
     bool ekf_z_{false};
+    bool debug{false};
+
+    // Visual odometry
+    bool   use_vo_{false};
+    double vo_max_delta_{2.0};
+    double vo_reset_thresh_{0.05};
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr vo_sub_;
+    std::mutex          vo_mutex_;
+    Eigen::Matrix4f     latest_vo_pose_{Eigen::Matrix4f::Identity()};
+    Eigen::Matrix4f     prev_vo_pose_{Eigen::Matrix4f::Identity()};
+    bool                has_vo_{false};
+    bool                prev_vo_pose_valid_{false};
+    bool                vo_reset_pending_{false};
+    gtsam::SharedNoiseModel voNoise_;
+    Eigen::Matrix4f prev_scan_pose_{Eigen::Matrix4f::Identity()};
+    bool            has_prev_scan_{false};
     bool loop_ekf_z_{false};
 
     double odom_noise_roll_{0.1},  odom_noise_pitch_{0.1}, odom_noise_yaw_{0.3};
@@ -1688,12 +1971,19 @@ private:
 
     // ── IMU / DVL ─────────────────────────────────────────────────────────────
     bool   use_imu_{false}, use_dvl_{false}, use_dvl_trans_{false};
+    double dvl_max_vel_{3.0};
+    double imu_max_accel_{50.0};
+    double imu_max_gyro_{10.0};
     int    imu_start_kf_{0};   // keyframes to wait before activating ImuFactor
 
     // IMU preintegration
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
     std::mutex                                              imu_mutex_;
     std::shared_ptr<gtsam::PreintegratedImuMeasurements>   preint_;
+    std::shared_ptr<gtsam::PreintegratedImuMeasurements>   scan_preint_;  // resets each scan for initial-guess prediction
+    Eigen::Vector3f   scan_dvl_dp_{Eigen::Vector3f::Zero()};   // integrated DVL translation since last scan
+    Eigen::Matrix3d   scan_dvl_dR_{Eigen::Matrix3d::Identity()}; // accumulated rotation since last scan (for DVL integration)
+    bool              scan_dvl_valid_{false};
     double imu_last_time_{0.0};
     bool   has_imu_first_{false};
 
