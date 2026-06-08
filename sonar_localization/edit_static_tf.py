@@ -303,9 +303,9 @@ def parse_args():
     parser.add_argument("bag",          help="Input bag directory")
     parser.add_argument("parent_frame", help="TF parent frame ID", default="usv/base_link")
     parser.add_argument("child_frame",  help="TF child frame ID", default="usv/sonar_link")
-    parser.add_argument("--xyz", nargs=3, type=float, default=[0.38, -0.08, 0.525],
+    parser.add_argument("--xyz", nargs=3, type=float, default=[0.38, 0.08, -0.525],
                         metavar=("X", "Y", "Z"), help="Translation in metres")
-    parser.add_argument("--rpy", nargs=3, type=float, default=[0.0, -30.0, 0.0],
+    parser.add_argument("--rpy", nargs=3, type=float, default=[0.0, 30.0, 180.0],
                         metavar=("R", "P", "Y"), help="Rotation in degrees (roll pitch yaw)")
     parser.add_argument("-o", "--output", default=None,
                         help="Output bag directory (default: <bag>_patched)")

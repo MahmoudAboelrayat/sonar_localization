@@ -10,7 +10,7 @@ from launch.conditions import IfCondition
 
 def launch_setup(context, *args, **kwargs):
     pkg_share = get_package_share_directory('sonar_localization')
-    ekf_config_path = os.path.join(pkg_share, 'config', 'ekf_usv.yaml')
+    ekf_config_path = os.path.join(pkg_share, 'config', 'ekf_loop.yaml')
 
     rviz_flag  = LaunchConfiguration('rviz').perform(context).lower() in ('true', '1', 'yes')
     use_dock = LaunchConfiguration('dock').perform(context).lower() in ('true', '1', 'yes')
@@ -18,6 +18,7 @@ def launch_setup(context, *args, **kwargs):
     gicp_backend = LaunchConfiguration('gicp').perform(context).lower()  # 'fast' or 'small'
     sim_time = LaunchConfiguration('sim_time').perform(context).lower() in ('true', '1', 'yes')
     dvl_type = LaunchConfiguration('dvl_type').perform(context).lower()
+    init_x, init_y, init_z, init_yaw = 0.0, 0.0, 0.0, 0.0
 
     state_publisher = True if(rviz_flag and use_dock)else False
     # if full_bag:
@@ -33,8 +34,9 @@ def launch_setup(context, *args, **kwargs):
     #     if gicp_backend == 'small':
     #         vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_small_vgicp_rov.yaml')
     #     else:
-    #         vgicp_config_path = os.path.join(pkg_share, 'config', 'vgicp_tank.yaml')
-    vgicp_config_path = os.path.join(pkg_share, 'config', 'usv_localization.yaml')
+    
+    vgicp_config_path = os.path.join(pkg_share, 'config', 'loop_vgicp_rov_june.yaml')
+
     icp_executable = 'loopclosure_samll_vgicp' if gicp_backend == 'small' else 'loopclosure_vgicp'
 
     return [
@@ -56,23 +58,48 @@ def launch_setup(context, *args, **kwargs):
 
             
         #### EKF Nodes ####
-        # Node(
-        #     package='robot_localization',
-        #     executable='ekf_node',
-        #     name='ekf_local',
-        #     output='screen',
-        #     parameters=[ekf_config_path,{'use_sim_time': sim_time}],
-        #     remappings=[
-        #         ('odometry/filtered', 'odometry/ekf_local')
-        #     ]
-        # ),
-        # Node(
-        #     package='robot_localization',
-        #     executable='ekf_node',
-        #     name='ekf_global',
-        #     output='screen',
-        #     parameters=[ekf_config_path,{'use_sim_time': sim_time}]
-        # ),
+        Node(
+            package='robot_localization',
+            executable='ekf_node',
+            name='ekf_local',
+            output='screen',
+            parameters=[ekf_config_path,{'use_sim_time': sim_time}],
+            remappings=[
+                ('odometry/filtered', 'odometry/ekf_local')
+            ]
+        ),
+        Node(
+            package='robot_localization',
+            executable='ekf_node',
+            name='ekf_global',
+            output='screen',
+            parameters=[ekf_config_path,{'use_sim_time': sim_time}]
+        ),
+
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_sonar',
+            arguments=['0.165', '0.037', '-0.114', '0.0', '-0.3926991', '0.0', 'base_link', 'sonar_link'],
+            output='screen',
+        ),
+
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_camera',
+            arguments=['0.165', '-0.052', '-0.114', '1.5707963', '0.0', '1.1780972', 'base_link', 'hd_camera_link'],
+            output='screen',
+        ),
+
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_dvl',
+            arguments=['0.0', '-0.106', '0.265', '0.0', '0.0', '0.0', 'base_link', 'dvl_link'],
+            output='screen',
+        ),
+
 
 
         # TF
@@ -90,12 +117,12 @@ def launch_setup(context, *args, **kwargs):
         #     arguments=['0', '0', '0', '3.1415', '0', '0.0', 'saabmarine/base_link', 'gps'],
         #     parameters=[{'use_sim_time': sim_time}]
         # ),
-        #  Node(
-        #     package='tf2_ros',
-        #     executable='static_transform_publisher',
-        #     name='Beckholmen_tf',
-        #     arguments=['0', '0', '0', '0.0', '0', '3.14159265359', 'odom', 'odom_frd'],
-        #     parameters=[{'use_sim_time': True}]),
+         Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='Beckholmen_tf',
+            arguments=['0', '0', '0', '0.0', '0', '3.14159265359', 'world', 'Beckholmen'],
+            parameters=[{'use_sim_time': sim_time}]),
 
         # Node(
         #     package='tf2_ros',
@@ -112,23 +139,13 @@ def launch_setup(context, *args, **kwargs):
         #     parameters=[{'use_sim_time': sim_time}]
         # ),
 
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_link_to_sonar',
-            arguments=['0.38', '0.08', '-0.525', '0.0', '0.52', '3.14159', 'base_link', 'usv/sonar_link'],
-            parameters=[{'use_sim_time': True}]
-        ),
-
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_link_to_imu',
-            arguments=['0.0', '0.0', '0.0', '0.0', '0.0', '3.1415', 'base_link', 'imu_link_ned'],
-            parameters=[{'use_sim_time': True}]
-        ),
-
-
+        # Node(
+        #     package='tf2_ros',
+        #     executable='static_transform_publisher',
+        #     name='base_link_to_dvl',
+        #     arguments=['-0.150', '-0.150', '0.150', '0.0', '0.0', '0.0', 'base_link', 'bluerov2/dvl_imu'],
+        #     parameters=[{'use_sim_time': sim_time}]
+        # ),
 
 
         # Node(
@@ -149,42 +166,21 @@ def launch_setup(context, *args, **kwargs):
         # ),
 
         ############ full bag
-        #  Node(
-        #     package='sonar_localization',
-        #     executable='odom_tf',
-        #     name='map_tf',
-        #     output='screen',
-        #     parameters=[{'parent_frame': 'world', 'child_frame': 'icp_map', 'use_sim_time': sim_time, 'init_x': init_x, 'init_y': init_y, 'init_z': init_z, 'init_yaw': init_yaw,'init_roll':0.0,'init_pitch':0.0}]
-        # ),
-
-        # vgicp odometry
-
-        Node(
+         Node(
             package='sonar_localization',
-            executable='odom_mapping',
-            name='odom_mapping_node',
+            executable='odom_tf',
+            name='map_tf',
             output='screen',
-            parameters=[{
-                'map_resolution': 0.1,
-                'publish_every':  10,
-                'base2sonar_p': 25.0,
-                'max_pts_per_voxel':2,
-                'odom_warmup':10,
-                'max_range':-1.0,
-            }],
+            parameters=[{'parent_frame': 'world', 'child_frame': 'icp_map', 'use_sim_time': sim_time, 'init_x': init_x, 'init_y': init_y, 'init_z': init_z, 'init_yaw': init_yaw,'init_roll':0.0,'init_pitch':0.0}]
         ),
 
+        # vgicp odometry
         Node(
-            package='robot_localization',
-            executable='navsat_transform_node',
-            name='navsat_transform',
+            package='sonar_localization',
+            executable=icp_executable,
+            name='odom_vgicp',
             output='screen',
-            parameters=[{'use_sim_time': True}, ekf_config_path],
-            remappings=[
-                ('/gps/fix', '/imu/nav_sat_fix'),     # Map to your SBG topic
-                ('imu', 'imu/data'),            # Map to your IMU topic
-                ('odometry/filtered', 'imu/odometry')
-            ]
+            parameters=[vgicp_config_path]
         ),
         
         # rviz
@@ -194,19 +190,11 @@ def launch_setup(context, *args, **kwargs):
             executable='rviz2',
             name='rviz2',
             output='screen',
-            arguments=['-d', os.path.join(pkg_share, 'rviz', 'usv_mapping.rviz')],
+            arguments=['-d', os.path.join(pkg_share, 'rviz', 'rov_dry_dock.rviz')],
             parameters=[{'use_sim_time': sim_time}],
             condition=IfCondition(LaunchConfiguration('rviz'))
         ),
             
-        Node(
-            package='robot_localization',
-            executable='ekf_node',
-            name='ekf_local',
-            output='screen',
-            parameters=[ekf_config_path, {'use_sim_time': sim_time}],
-        ),
-
         Node(
             package='robot_state_publisher',
             executable='robot_state_publisher',
@@ -220,6 +208,28 @@ def launch_setup(context, *args, **kwargs):
             }],
             condition=IfCondition(LaunchConfiguration('dock'))
         ),
+
+
+        ### Navsat #####
+        # Node(
+        #     package='robot_localization',
+        #     executable='navsat_transform_node',
+        #     name='navsat_transform',
+        #     output='screen',
+        #     parameters=[{'use_sim_time': True}, ekf_config_path],
+        #     remappings=[
+        #         ('/gps/fix', '/fix'),     # Map to your SBG topic
+        #         ('imu', '/mavros/imu/data'),            # Map to your IMU topic
+        #         ('odometry/filtered', '/odometry/filtered')
+        #     ]
+        # ),
+        # Node(
+        #     package='sonar_localization',
+        #     executable='ekf_to_csv_logger',
+        #     name='ekf_to_csv_logger',
+        #     output='screen',
+        #     parameters=[{'use_sim_time': True}]
+        # )
 
     ]
 

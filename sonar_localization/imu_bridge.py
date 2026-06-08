@@ -67,17 +67,28 @@ class ImuNoiseBridge(Node):
 
             # Apply error: New = Original * Error
             combined_rot = original_rot * error_rot
-            q = combined_rot.as_quat() # returns [x, y, z, w]
+            rpy = combined_rot.as_euler('xyz')
+            rpy[2] = rpy[2]  # flip yaw
+            q = R.from_euler('xyz', rpy).as_quat()  # returns [x, y, z, w]
 
             noisy_msg.orientation.x = q[0]
             noisy_msg.orientation.y = q[1]
             noisy_msg.orientation.z = q[2]
             noisy_msg.orientation.w = q[3]
         else:
-            noisy_msg.linear_acceleration =msg.linear_acceleration
-            noisy_msg.orientation = msg.orientation
-            noisy_msg.angular_velocity = msg.angular_velocity
-
+            noisy_msg.linear_acceleration = msg.linear_acceleration
+            orig = R.from_quat([msg.orientation.x, msg.orientation.y,
+                                 msg.orientation.z, msg.orientation.w])
+            rpy = orig.as_euler('xyz')
+            rpy[2] = rpy[2]  # flip yaw
+            q = R.from_euler('xyz', rpy).as_quat()
+            noisy_msg.orientation.x = q[0]
+            noisy_msg.orientation.y = q[1]
+            noisy_msg.orientation.z = q[2]
+            noisy_msg.orientation.w = q[3]
+            noisy_msg.angular_velocity.x = msg.angular_velocity.x
+            noisy_msg.angular_velocity.y = -msg.angular_velocity.y
+            noisy_msg.angular_velocity.z = -msg.angular_velocity.z
         # 4. UPDATE COVARIANCES (Variance = sigma^2)
         # Orientation covariance [roll, pitch, yaw]
         ori_cov = [0.0] * 9

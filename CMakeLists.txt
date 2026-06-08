@@ -16,6 +16,7 @@ find_package(visualization_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(pcl_ros REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(tf2_eigen REQUIRED)
 
 # External Libraries
 find_package(fast_gicp REQUIRED)
@@ -157,12 +158,39 @@ target_link_libraries(prior_map_publisher
   ${PCL_LIBRARIES}
 )
 
+# Node: map_matcher (aligns SLAM map → global map, publishes /initialpose correction)
+add_executable(map_matcher src/map_matcher.cpp)
+ament_target_dependencies(map_matcher
+  rclcpp sensor_msgs geometry_msgs pcl_conversions pcl_ros fast_gicp
+)
+target_include_directories(map_matcher PUBLIC
+  ${PCL_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+)
+target_link_libraries(map_matcher ${PCL_LIBRARIES})
+
+# Node: localization_prior (localization-only against a pre-built prior map)
+add_executable(localization_prior src/localization_prior.cpp)
+ament_target_dependencies(localization_prior
+  rclcpp sensor_msgs nav_msgs geometry_msgs
+  visualization_msgs pcl_conversions pcl_ros
+  fast_gicp GTSAM tf2_ros tf2_eigen
+)
+target_include_directories(localization_prior PUBLIC
+  ${GTSAM_INCLUDE_DIR}
+  ${PCL_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+)
+target_link_libraries(localization_prior
+  ${PCL_LIBRARIES}
+  gtsam)
+
 # Node: localization_imu_pre (VGICP SLAM + IMU preintegration + DVL factor)
 add_executable(localization_imu_pre src/localization_imu_pre.cpp)
 ament_target_dependencies(localization_imu_pre
   rclcpp sensor_msgs nav_msgs geometry_msgs
   visualization_msgs pcl_conversions pcl_ros
-  fast_gicp GTSAM
+  fast_gicp GTSAM tf2_ros
 )
 target_include_directories(localization_imu_pre PUBLIC
   ${GTSAM_INCLUDE_DIR}
@@ -176,6 +204,8 @@ target_link_libraries(localization_imu_pre
 
 # Install C++ Executables
 install(TARGETS
+  map_matcher
+  localization_prior
   localization_imu_pre
   loopclosure_vgicp
   loopclosure_samll_vgicp
@@ -258,6 +288,10 @@ install(PROGRAMS ${PROJECT_NAME}/nucleus_ahrs_bridge.py
 install(PROGRAMS ${PROJECT_NAME}/camera2point.py
       DESTINATION lib/${PROJECT_NAME}
       RENAME camera2point)       
+
+install(PROGRAMS ${PROJECT_NAME}/gps_rec.py
+        DESTINATION lib/${PROJECT_NAME}
+        RENAME gps_rec)
 # Install Shared Directories
 install(DIRECTORY launch config rviz description
   DESTINATION share/${PROJECT_NAME}

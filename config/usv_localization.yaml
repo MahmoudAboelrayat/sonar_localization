@@ -1,0 +1,132 @@
+localization_imu_pre:
+  ros__parameters:
+    is_ned: false
+    ekf_z: true
+    loop_ekf_z: false
+    ekf_max_age: 0.1
+
+    topics:
+      odom_pub: "vgicp_odom"
+      pc_sub: "/usv/point_cloud"
+      deadreckoining_sub: "imu/odometry"
+      map_pub: "vgicp_global_map"
+      imu_sub: "/imu/data"
+      dvl_sub: "/dvl/velocity"
+      ahrs_sub: "imu/data"
+      depth_sub: "/depth_odom"
+
+    tuning:
+      map_res: 0.2
+      vgicp_threads: 8
+      vgicp_epsilon: 1e-4
+      vgicp_max_dist: 0.8
+      vgicp_max_iter: 100
+      vgicp_resolution: 0.4
+      max_lost_frames: 40
+
+    radius_outlier_removal:
+      filter_radius_outliers: false
+      radius_search: 0.2
+      min_neighbors_in_radius: 30
+
+    outlier_removal:
+      filter_outliers: false
+      num_neighbors: 30
+      stddev_mul_thresh: 0.7
+
+    intensity_filter:
+      filter_intensity: false
+      min_intensity: 0.005
+
+    tf:
+      base2sonar_x: 0.38
+      base2sonar_y: 0.08
+      base2sonar_z: -0.525
+      base2sonar_roll: 180.0
+      base2sonar_pitch: -30.0   # degrees (- down / + up)
+      base2sonar_yaw: 0.0
+
+      # IMU mounting — rotation from IMU frame to base_link
+      imu2base_roll:  0.0      # degrees
+      imu2base_pitch: 0.0
+      imu2base_yaw:   0.0
+      # IMU lever arm — translation from base_link to IMU in base_link frame
+      imu2base_x: 0.0          # meters
+      imu2base_y: 0.0
+      imu2base_z: 0.0
+
+
+      # DVL lever arm — translation from base_link to dvl_link in body frame
+      # Used to remove the ω×r velocity component from DVL readings.
+      # Set to (0,0,0) to disable correction.
+      dvl2base_x: 0.0          # meters
+      dvl2base_y: 0.0
+      dvl2base_z: 0.0
+
+    keyframe:
+      submap_size: 30
+      dist_thresh: 0.8
+      angle_thresh: 8.0        # degrees
+
+    loop_closure:
+      use_lc: true
+      search_radius: 15.0
+      fitness_score: 0.2
+      history_gap: 40
+      submap_size: 10
+      vgicp_epsilon: 1e-4
+      vgicp_max_dist: 0.8
+      vgicp_max_iter: 100
+      vgicp_resolution: 0.3
+      use_ndt: false
+      ndt_resolution: 1.0
+      ndt_step_size: 1.0
+      ndt_max_iter: 150
+      ndt_epsilon: 0.01
+
+    gtsam:
+      odom_noise_x: 0.00125
+      odom_noise_y: 0.00125
+      odom_noise_z: 0.001
+      odom_noise_roll: 0.1
+      odom_noise_pitch: 0.1
+      odom_noise_yaw: 0.0125
+
+    imu:
+      use_imu: false            # set true to enable IMU preintegration
+      start_kf: 20              # keyframes to wait before activating ImuFactor (GICP warms up first)
+      accel_noise: 6.5e-4          # accelerometer white noise [m/s^2/sqrt(Hz)]
+      gyro_noise:  8.7e-5           # gyroscope white noise [rad/s/sqrt(Hz)]
+      accel_bias_noise: 1.35e-4  # accelerometer bias random walk (loosened for faster convergence)
+      gyro_bias_noise:  3.9e-5  # gyroscope bias random walk (loosened for faster convergence)
+      gravity: 9.81
+     
+      static_accel_bias_x:  -0.00  # m/s^2 — measured resting a_x
+      static_accel_bias_y:  0.0   # m/s^2 — measured resting a_y (primary Y drift source)
+      static_accel_bias_z:  0.0    # m/s^2 — Z is dominated by gravity, leave to GTSAM
+      static_gyro_bias_x:   0.0    # rad/s
+      static_gyro_bias_y:   0.0    # rad/s
+      static_gyro_bias_z:   0.00 # rad/s — measured resting omega_z (primary rotation drift)
+
+    ahrs:
+      use_ahrs: false           # set true to enable AHRS roll+pitch factor
+      noise_rp:  0.0061           # sigma [rad] for roll and pitch (~1°)
+      noise_yaw: 0.1            # sigma [rad] for yaw (~6°) — reserved for future use
+
+    depth:
+      use_depth: false          # set true to enable depth factor from depth_odom topic
+      noise: 0.05              # sigma [m] — typical pressure sensor ±5 cm
+
+    dvl:
+      use_dvl: false            # set true to enable DVL velocity factor
+      use_dvl_trans: false     # set true to also enable DVL pre-integrated translation factor
+      noise_x: 0.001             # [m/s]
+      noise_y: 0.001
+      noise_z: 0.05
+      trans_noise_x: 0.01        # [m] DVL translation noise x
+      trans_noise_y: 0.01        # [m] DVL translation noise y
+      trans_noise_z: 0.01        # [m] DVL translation noise z
+
+    frames:
+      odom_frame: "odom"
+      base_frame: "base_link"
