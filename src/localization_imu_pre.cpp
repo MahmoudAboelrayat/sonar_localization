@@ -73,8 +73,8 @@ public:
     gtsam::Vector evaluateError(
         const gtsam::Pose3 & pose,
         const gtsam::Vector3 & vel_world,
-        boost::optional<gtsam::Matrix&> H1 = boost::none,
-        boost::optional<gtsam::Matrix&> H2 = boost::none) const override
+        gtsam::OptionalMatrixType H1 = nullptr,
+        gtsam::OptionalMatrixType H2 = nullptr) const override
     {
         auto f = [this](const gtsam::Pose3& p, const gtsam::Vector3& v) -> gtsam::Vector3 {
             return p.rotation().matrix().transpose() * v - v_measured_body_;
@@ -120,8 +120,8 @@ public:
     gtsam::Vector evaluateError(
         const gtsam::Pose3 & pose_i,
         const gtsam::Pose3 & pose_j,
-        boost::optional<gtsam::Matrix&> H1 = boost::none,
-        boost::optional<gtsam::Matrix&> H2 = boost::none) const override
+        gtsam::OptionalMatrixType H1 = nullptr,
+        gtsam::OptionalMatrixType H2 = nullptr) const override
     {
         auto f = [this](const gtsam::Pose3& pi, const gtsam::Pose3& pj) -> gtsam::Vector3 {
             Eigen::Matrix3d Ri  = pi.rotation().matrix();
@@ -154,7 +154,7 @@ public:
 
     gtsam::Vector evaluateError(
         const gtsam::Pose3 & pose,
-        boost::optional<gtsam::Matrix&> H = boost::none) const override
+        gtsam::OptionalMatrixType H = nullptr) const override
     {
         auto f = [this](const gtsam::Pose3& p) -> gtsam::Vector1 {
             return (gtsam::Vector1() << p.translation().z() - z_measured_).finished();
@@ -784,13 +784,21 @@ private:
             }
 
             if (used_imu_factor) {
+                // Velocity seed: full bias-corrected prediction
                 gtsam::NavState prop = preint_->predict(
                     gtsam::NavState(
-                        matrix2Pose3(keyframes_.back().pose),  // pose at i-1
-                        prev_velocity_),                        // velocity at i-1
+                        matrix2Pose3(keyframes_.back().pose),
+                        prev_velocity_),
                     prev_bias_);
-                initialEstimates_.insert(X(current_id), prop.pose());      // IMU-propagated pose
-                initialEstimates_.insert(V(current_id), prop.velocity());  // IMU-propagated velocity
+
+                // Rotation seed: raw gyro integration only (no bias correction),
+                // same as EKF process model — R_j = R_{i-1} * ΔR_gyro
+                gtsam::Rot3 gyro_rot =
+                    matrix2Pose3(keyframes_.back().pose).rotation() * preint_->deltaRij();
+
+                initialEstimates_.insert(X(current_id),
+                    gtsam::Pose3(gyro_rot, current_gtsam_pose.translation()));
+                initialEstimates_.insert(V(current_id), prop.velocity());
             } else {
                 initialEstimates_.insert(X(current_id), current_gtsam_pose);  // fall back to GICP
                 if (use_imu_ || use_dvl_) {
@@ -875,7 +883,7 @@ private:
                     // nRef    = gravity direction in world   = (0,0,1) for Z-down
                     // bMeasured = gravity direction in body  = R_wb^T * (0,0,1)
                     gtsam::Unit3 g_body(ahrs_snap.transpose() * gtsam::Vector3(0, 0, 1));
-                    gtSAMgraph_.add(gtsam::Pose3AttitudeFactor(
+                    gtSAMgraph_.add(gtsam::AttitudeFactor<gtsam::Pose3>(
                         X(current_id),
                         gtsam::Unit3(0, 0, 1),  // nZ    — gravity direction in world (Z-down)
                         ahrsNoise_,              // noise model
@@ -904,7 +912,7 @@ private:
                     accel_count_ = 0;
                 }
                 if (g_ok) {
-                    gtSAMgraph_.add(gtsam::Pose3AttitudeFactor(
+                    gtSAMgraph_.add(gtsam::AttitudeFactor<gtsam::Pose3>(
                         X(current_id),
                         gtsam::Unit3(0, 0, 1),    // gravity in world (Z-down)
                         accelGravityNoise_,
@@ -1628,10 +1636,21 @@ private:
             std::lock_guard<std::mutex> pose_lock(pose_mutex_);
             current_global = global_pose_;
         }
+        // Helper: mat → "xyz=[x, y, z]  yaw=Y deg"
+        auto fmt_pose = [](const Eigen::Matrix4f& m) -> std::string {
+            Eigen::Vector3f t = m.block<3,1>(0,3);
+            float yaw = std::atan2(m(1,0), m(0,0)) * 180.f / M_PI;
+            char buf[120];
+            std::snprintf(buf, sizeof(buf),
+                "xyz=[%.3f, %.3f, %.3f]  yaw=%.2f°", t.x(), t.y(), t.z(), yaw);
+            return buf;
+        };
+
         Eigen::Matrix4f initial_guess;
         if (use_ekf_) {
             Eigen::Matrix4f ekf_delta = prev_ekf_pose_.inverse() * current_ekf_pose;
             initial_guess = current_global * ekf_delta;
+            RCLCPP_INFO(get_logger(), "[InitGuess|EKF    ] %s", fmt_pose(initial_guess).c_str());
         } else if (use_dvl_) {
             bool dvl_ok;
             Eigen::Vector3f dvl_integrated;
@@ -1641,35 +1660,31 @@ private:
                 dvl_integrated = scan_dvl_dp_;
             }
 
-            if (dvl_ok) {
-                // Gyro rotation (deltaRij uses gyro only, NOT accelerometer) + DVL translation
-                gtsam::Rot3 delta_R;
-                {
-                    std::lock_guard<std::mutex> ilk(imu_mutex_);
-                    delta_R = scan_preint_->deltaRij();
-                }
-                Eigen::Matrix3f R_wb = current_global.block<3,3>(0,0);
-                Eigen::Vector3f t_delta = R_wb * dvl_integrated;
-
-                Eigen::Matrix4f scan_delta = Eigen::Matrix4f::Identity();
-                scan_delta.block<3,3>(0,0) = delta_R.matrix().cast<float>();
-                scan_delta.block<3,1>(0,3) = t_delta;
-                initial_guess = current_global * scan_delta;
-            } else {
-                // DVL dead — gyro rotation only, no translation prediction
-                gtsam::Rot3 delta_R;
-                {
-                    std::lock_guard<std::mutex> ilk(imu_mutex_);
-                    delta_R = scan_preint_->deltaRij();
-                }
-                Eigen::Matrix4f scan_delta = Eigen::Matrix4f::Identity();
-                scan_delta.block<3,3>(0,0) = delta_R.matrix().cast<float>();
-                initial_guess = current_global * scan_delta;
+            // Raw gyro rotation — bias-free, same as EKF process model
+            // scan_dvl_dR_ integrates Exp(ω*dt) without GTSAM bias correction
+            Eigen::Matrix3f raw_dR;
+            {
+                std::lock_guard<std::mutex> ilk(imu_mutex_);
+                raw_dR = scan_dvl_dR_.cast<float>();
             }
+
+            Eigen::Matrix4f scan_delta = Eigen::Matrix4f::Identity();
+            scan_delta.block<3,3>(0,0) = raw_dR;
+
+            if (dvl_ok) {
+                // scan_dvl_dp_ is already in the initial body frame (B0):
+                // each DVL sample was rotated by scan_dvl_dR_ before accumulation.
+                // current_global * scan_delta will apply R_wb once — don't pre-multiply.
+                scan_delta.block<3,1>(0,3) = dvl_integrated;
+            }
+            initial_guess = current_global * scan_delta;
+            RCLCPP_INFO(get_logger(), "[InitGuess|DVL+gyro] %s  dvl_ok=%d",
+                fmt_pose(initial_guess).c_str(), dvl_ok ? 1 : 0);
         } else if (has_prev_scan_) {
             // Constant velocity fallback — IMU not yet running
             Eigen::Matrix4f delta = prev_scan_pose_.inverse() * current_global;
             initial_guess = current_global * delta;
+            RCLCPP_INFO(get_logger(), "[InitGuess|const-vel] %s", fmt_pose(initial_guess).c_str());
         } else {
             initial_guess = current_global;  // first scan — zero-motion
         }
@@ -1751,15 +1766,16 @@ private:
             if (use_ekf_) prev_ekf_pose_ = current_ekf_pose;
             prev_scan_pose_ = current_global;
             has_prev_scan_  = true;
-            if (scan_preint_) {
+            {
                 std::lock_guard<std::mutex> ilk(imu_mutex_);
-                scan_preint_ = std::make_shared<gtsam::PreintegratedImuMeasurements>(
-                    scan_preint_->params(), prev_bias_);
+                if (scan_preint_)
+                    scan_preint_ = std::make_shared<gtsam::PreintegratedImuMeasurements>(
+                        scan_preint_->params(), prev_bias_);
+                scan_dvl_dR_  = Eigen::Matrix3d::Identity();  // same lock as imuCallback writes
             }
             {
                 std::lock_guard<std::mutex> dlk(dvl_mutex_);
                 scan_dvl_dp_    = Eigen::Vector3f::Zero();
-                scan_dvl_dR_    = Eigen::Matrix3d::Identity();
                 scan_dvl_valid_ = false;
             }
 
@@ -1781,15 +1797,16 @@ private:
                     global_pose_ = initial_guess;
                     if (use_ekf_) prev_ekf_pose_ = current_ekf_pose;
                 }
-                if (scan_preint_) {
+                {
                     std::lock_guard<std::mutex> ilk(imu_mutex_);
-                    scan_preint_ = std::make_shared<gtsam::PreintegratedImuMeasurements>(
-                        scan_preint_->params(), prev_bias_);
+                    if (scan_preint_)
+                        scan_preint_ = std::make_shared<gtsam::PreintegratedImuMeasurements>(
+                            scan_preint_->params(), prev_bias_);
+                    scan_dvl_dR_  = Eigen::Matrix3d::Identity();
                 }
                 {
                     std::lock_guard<std::mutex> dlk(dvl_mutex_);
                     scan_dvl_dp_    = Eigen::Vector3f::Zero();
-                    scan_dvl_dR_    = Eigen::Matrix3d::Identity();
                     scan_dvl_valid_ = false;
                 }
                 prev_scan_pose_ = initial_guess;

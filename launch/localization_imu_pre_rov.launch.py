@@ -180,7 +180,7 @@ def launch_setup(context, *args, **kwargs):
                 ('imu',           '/dvl/imu'),
                 ('gps/fix',            'fix'),
                 ('odometry/filtered',  'odometry/filtered'),
-            ],
+            ], 
         ),
     ]
 
