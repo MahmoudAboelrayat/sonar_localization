@@ -95,7 +95,7 @@ class OdomTfNode(Node):
         q_fixed = self.quaternion_from_euler(self.init_roll, self.init_pitch, yaw)
         self._publish_tf(p.x, p.y, self.init_z, q_fixed[0], q_fixed[1], q_fixed[2], q_fixed[3])
         self.get_logger().info(
-            f"Initial pose set: [{p.x:.3f}, {p.y:.3f}, {self.init_z:.3f}]")
+            f"Initial pose set: [{p.x:.3f}, {p.y:.3f}, {self.init_z:.3f}], [{roll:.3f}, {pitch:.3f}, {yaw:.3f}]")
 
     def _publish_tf(self, tx, ty, tz, qx, qy, qz, qw=1.0):
         t = TransformStamped()
@@ -104,7 +104,7 @@ class OdomTfNode(Node):
         t.child_frame_id  = self.child_frame
         t.transform.translation.x = tx
         t.transform.translation.y = ty
-        t.transform.translation.z = tz
+        t.transform.translation.z = -tz
         t.transform.rotation.x = qx
         t.transform.rotation.y = qy
         t.transform.rotation.z = qz

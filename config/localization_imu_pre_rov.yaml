@@ -1,23 +1,29 @@
-localization_imu_pre:
+/**:
   ros__parameters:
     debug: false
     is_ned: false
     ekf_z: false
     loop_ekf_z: false
-    use_ekf: false
+    use_ekf: true
+    publish_tf: false
     ekf_max_age: 0.1
 
     topics:
       odom_pub: "vgicp_odom"
       pc_sub: "/sonar/point_cloud"
-      deadreckoining_sub: "/odometry/filtered"
-      map_pub: "vgicp_global_map"
+      deadreckoining_sub: "odometry/filtered"
+      map_pub: "vgicp_sub_map"
       imu_sub: "/dvl/imu"
       dvl_sub: "/dvl/velocity"
       ahrs_sub: "/dvl/ahrs_imu"
       depth_sub: "/depth_odom"
       vo_sub: "/odometry/visual"
 
+
+
+    frames:
+      odom_frame: "icp_map"
+      base_frame: "base_link"
 
     tuning:
       map_res: 0.1
@@ -27,6 +33,9 @@ localization_imu_pre:
       vgicp_max_iter: 100
       vgicp_resolution: 0.3
       max_lost_frames: 40
+      gicp_fitness_score:         2.0    # reject scan if score exceeds this
+      gicp_max_correction_dist:   2.0    # reject if correction > 1m from initial guess
+      gicp_max_correction_angle:  30.0   # reject if correction > 15deg from initial guess
 
     radius_outlier_removal:
       filter_radius_outliers: true
@@ -47,7 +56,7 @@ localization_imu_pre:
       base2sonar_y: 0.1437
       base2sonar_z: -0.3794
       base2sonar_roll: 0.0
-      base2sonar_pitch: -22.5   # degrees (- down / + up)
+      base2sonar_pitch: -20.0   # (22.5) degrees (- down / + up)
       base2sonar_yaw: 0.0
 
       # IMU mounting — rotation from IMU frame to base_link
@@ -150,8 +159,3 @@ localization_imu_pre:
       noise_roll:  0.01
       noise_pitch: 0.01
       noise_yaw:   0.05
-
-
-    frames:
-      odom_frame: "icp_map"
-      base_frame: "dvl_link"

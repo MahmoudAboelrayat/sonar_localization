@@ -1,0 +1,127 @@
+localization_prior_node:
+  ros__parameters:
+    is_ned: false
+    use_ekf: true
+    ekf_z: false
+    ekf_max_age: 0.1
+    debug: false
+    publish_tf: false
+
+    topics:
+      odom_pub:           "vgicp_odom"
+      pc_sub:             "/sonar/point_cloud"
+      deadreckoining_sub: "odometry/filtered"
+      map_pub:            "vgicp_local_map"
+      prior_map_sub:      "/prior_map"        # pre-built map published by prior_map_publisher
+      initialpose_pub:    "/initialpose"       # odom_tf.py subscribes here to update the TF
+      imu_sub:            "/dvl/imu"
+      dvl_sub:            "/dvl/velocity"
+      ahrs_sub:           "/dvl/ahrs_imu"
+      depth_sub:          "/depth_odom"
+
+    tuning:
+      map_res:         0.1
+      vgicp_threads:   6
+      vgicp_epsilon:   1e-4
+      vgicp_max_dist:  1.5
+      vgicp_max_iter:  100
+      vgicp_resolution: 0.3
+      max_lost_frames: 40
+      min_ekf_msgs:    20
+
+    # ── Global localization (align local submap → prior map) ──────────────────
+    # Runs every `period` seconds in a background thread.
+    # A successful match publishes /initialpose → odom_tf.py corrects the TF.
+    global_loc:
+      period:           5.0    # seconds between localization attempts
+      fitness_score:    0.2    # reject match if VGICP score exceeds this
+      submap_size:      20     # number of recent keyframes used for matching
+      vgicp_max_dist:   3.0    # wider than odometry to handle drift
+      vgicp_max_iter:   150
+      vgicp_epsilon:    1e-4
+      vgicp_resolution: 0.3
+
+    radius_outlier_removal:
+      filter_radius_outliers: true
+      search_radius:           0.2
+      min_neighbors_in_radius: 30
+
+    outlier_removal:
+      filter_outliers:    true
+      num_neighbors:      30
+      stddev_mul_thresh:  0.7
+
+    tf:
+      base2sonar_x:     0.163
+      base2sonar_y:     0.1437
+      base2sonar_z:    -0.3794
+      base2sonar_roll:  0.0
+      base2sonar_pitch: -22.5   # degrees (- down / + up)
+      base2sonar_yaw:   0.0
+
+      imu2base_roll:    0.0
+      imu2base_pitch:   0.0
+      imu2base_yaw:     0.0
+      imu2base_x:       0.0
+      imu2base_y:       0.0
+      imu2base_z:       0.0
+
+      dvl2base_x:       0.0
+      dvl2base_y:       0.0
+      dvl2base_z:       0.0
+
+    keyframe:
+      submap_size:  40
+      dist_thresh:  0.5
+      angle_thresh: 8.0    # degrees
+      min_dt:       0.3    # seconds — minimum time between keyframes
+
+    gtsam:
+      odom_noise_x:     0.012
+      odom_noise_y:     0.012
+      odom_noise_z:     0.1
+      odom_noise_roll:  0.1
+      odom_noise_pitch: 0.1
+      odom_noise_yaw:   0.0125
+
+    imu:
+      use_imu:          true
+      start_kf:         10
+      accel_noise:      6.5e-2
+      gyro_noise:       8.7e-2
+      accel_bias_noise: 1.35e-4
+      gyro_bias_noise:  3.9e-5
+      gravity:          9.81
+      max_accel:        50.0
+      max_gyro:         10.0
+      static_accel_bias_x:  0.0
+      static_accel_bias_y:  0.0
+      static_accel_bias_z:  0.0
+      static_gyro_bias_x:   0.0
+      static_gyro_bias_y:   0.0
+      static_gyro_bias_z:   0.0
+
+    ahrs:
+      use_ahrs:  true
+      noise_rp:  0.0061    # sigma [rad] for roll and pitch (~0.35°)
+      noise_yaw: 0.1       # reserved
+
+    depth:
+      use_depth: true
+      noise:     1e-4      # sigma [m]
+
+    dvl:
+      use_dvl:       true
+      use_dvl_trans: true
+      max_vel:       2.0
+      noise_x:       0.001
+      noise_y:       0.001
+      noise_z:       0.05
+      trans_noise_x: 0.001
+      trans_noise_y: 0.001
+      trans_noise_z: 0.001
+
+    frames:
+      odom_frame:   "icp_map"
+      base_frame:   "dvl_link"
+      parent_frame: "world"    # must match odom_tf.py parent_frame

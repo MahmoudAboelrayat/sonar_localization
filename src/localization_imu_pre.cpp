@@ -46,6 +46,8 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <visualization_msgs/msg/marker.hpp>
+#include <tf2_ros/transform_broadcaster.h>
+#include <geometry_msgs/msg/transform_stamped.hpp>
 
 using gtsam::symbol_shorthand::X;
 using gtsam::symbol_shorthand::V;
@@ -239,7 +241,12 @@ public:
         loop_ekf_z_    = this->declare_parameter<bool>("loop_ekf_z", false);
         ekf_max_age_   = this->declare_parameter<double>("ekf_max_age", 0.1);
 
-        debug = this->declare_parameter<bool>("debug", false);
+        debug        = this->declare_parameter<bool>("debug",       false);
+        publish_tf_  = this->declare_parameter<bool>("publish_tf",  false);
+        if (publish_tf_) {
+            tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+            RCLCPP_INFO(get_logger(), "TF broadcasting enabled (%s -> %s)", odom_frame_.c_str(), base_frame_.c_str());
+        }
 
         submap_size_     = this->declare_parameter<int>   ("keyframe.submap_size",  20);
         kf_dist_thresh_  = this->declare_parameter<double>("keyframe.dist_thresh",  0.5);
@@ -256,6 +263,7 @@ public:
         // GICP sanity check thresholds
         gicp_max_correction_dist_  = this->declare_parameter<double>("tuning.gicp_max_correction_dist",  1.0);
         gicp_max_correction_angle_ = this->declare_parameter<double>("tuning.gicp_max_correction_angle", 15.0);
+        gicp_fitness_score_        = this->declare_parameter<double>("tuning.gicp_fitness_score",         0.0);  // 0 = disabled
 
         // Extrinsics: translation + RPY in degrees (sonar -> base)
         double b2s_t_x   = this->declare_parameter<double>("tf.base2sonar_x",      -0.545);
@@ -1563,6 +1571,8 @@ private:
             filtered = ror_out;
         }
 
+        if (filtered->empty()) return;  // nothing to match against — avoids VGICP SIGFPE
+
         // 4. Grab EKF snapshot
         Eigen::Matrix4f current_ekf_pose;
         {
@@ -1660,21 +1670,30 @@ private:
         pcl::PointCloud<pcl::PointXYZ> aligned;
         vgicp_.align(aligned, initial_guess);
 
-        if (vgicp_.hasConverged()) {
-            Eigen::Matrix4f result = vgicp_.getFinalTransformation();
+        // hasConverged() must be called first — querying score/transform before it
+        // resets fast_gicp's internal state and causes it to return false.
+        bool converged = vgicp_.hasConverged();
 
-            Eigen::Matrix4f diff           = initial_guess.inverse() * result;
-            float correction_dist          = diff.block<3,1>(0,3).norm();
-            float correction_angle         = Eigen::AngleAxisf(
-                Eigen::Matrix3f(diff.block<3,3>(0,0))).angle() * 180.0f / M_PI;
+        Eigen::Matrix4f result        = vgicp_.getFinalTransformation();
+        double          gicp_score    = vgicp_.getFitnessScore();
+        Eigen::Matrix4f diff          = initial_guess.inverse() * result;
+        float correction_dist         = diff.block<3,1>(0,3).norm();
+        float correction_angle        = Eigen::AngleAxisf(
+            Eigen::Matrix3f(diff.block<3,3>(0,0))).angle() * 180.0f / M_PI;
 
-            if (debug) {
-                RCLCPP_INFO(get_logger(),
-                    "GICP | score: %.4f | correction: t=%.2fm angle=%.1fdeg | src: %zu | tgt: %zu",
-                    vgicp_.getFitnessScore(), correction_dist, correction_angle,
-                    filtered->size(), map_snapshot->size());
-            }
+        bool gicp_rejected = converged && (
+            (gicp_fitness_score_ > 0.0 && gicp_score > gicp_fitness_score_) ||
+            correction_dist  > static_cast<float>(gicp_max_correction_dist_) ||
+            correction_angle > static_cast<float>(gicp_max_correction_angle_));
 
+        if (debug && converged) {
+            RCLCPP_INFO(get_logger(),
+                "GICP | score: %.4f | correction: t=%.2fm angle=%.1fdeg | src: %zu | tgt: %zu",
+                gicp_score, correction_dist, correction_angle,
+                filtered->size(), map_snapshot->size());
+        }
+
+        if (converged && !gicp_rejected) {
             lost_frames_ = 0;
 
             {
@@ -1716,19 +1735,52 @@ private:
             }
 
         } else {
-            if (debug) {
-                RCLCPP_WARN(get_logger(), "VGICP did not converge (lost=%d) — falling back to %s",
-                    lost_frames_, use_ekf_ ? "EKF" : "IMU prediction");
+            if (gicp_rejected) {
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                    "GICP rejected — score=%.4f (max %.4f)  t=%.2fm (max %.2f)  angle=%.1fdeg (max %.1f)",
+                    gicp_score,       gicp_fitness_score_,
+                    correction_dist,  gicp_max_correction_dist_,
+                    correction_angle, gicp_max_correction_angle_);
+            } else if (debug) {
+                RCLCPP_WARN(get_logger(), "VGICP did not converge (lost=%d)",
+                    lost_frames_);
             }
             if (lost_frames_ < max_lost_frames) {
                 ++lost_frames_;
-                std::lock_guard<std::mutex> pose_lock(pose_mutex_);
-                global_pose_ = initial_guess;
-                if (use_ekf_) prev_ekf_pose_ = current_ekf_pose;
+                {
+                    std::lock_guard<std::mutex> pose_lock(pose_mutex_);
+                    global_pose_ = initial_guess;
+                    if (use_ekf_) prev_ekf_pose_ = current_ekf_pose;
+                }
                 if (scan_preint_) {
                     std::lock_guard<std::mutex> ilk(imu_mutex_);
                     scan_preint_ = std::make_shared<gtsam::PreintegratedImuMeasurements>(
                         scan_preint_->params(), prev_bias_);
+                }
+                {
+                    std::lock_guard<std::mutex> dlk(dvl_mutex_);
+                    scan_dvl_dp_    = Eigen::Vector3f::Zero();
+                    scan_dvl_dR_    = Eigen::Matrix3d::Identity();
+                    scan_dvl_valid_ = false;
+                }
+                prev_scan_pose_ = initial_guess;
+                has_prev_scan_  = true;
+                // Directly push the current scan into the local map at the
+                // dead-reckoning pose.  AddKeyFrame is not used here because its
+                // distance threshold (0.5 m) silently returns without updating when
+                // frames arrive at 6 Hz — exactly the condition that freezes the
+                // target and causes the score to keep exploding.
+                {
+                    pcl::PointCloud<pcl::PointXYZ>::Ptr scan_in_odom(
+                        new pcl::PointCloud<pcl::PointXYZ>);
+                    pcl::transformPointCloud(*filtered, *scan_in_odom, initial_guess);
+                    std::lock_guard<std::mutex> kf_lk(kf_mutex_);
+                    *local_map_ += *scan_in_odom;
+                    pcl::PointCloud<pcl::PointXYZ>::Ptr ds(
+                        new pcl::PointCloud<pcl::PointXYZ>);
+                    map_filter_.setInputCloud(local_map_);
+                    map_filter_.filter(*ds);
+                    local_map_ = ds;
                 }
             } else {
                 RCLCPP_WARN(get_logger(), "Tracking lost — restarting SLAM.");
@@ -1800,6 +1852,21 @@ private:
 
 
         odom_pub_->publish(odom);
+
+        if (publish_tf_ && tf_broadcaster_) {
+            geometry_msgs::msg::TransformStamped tf_msg;
+            tf_msg.header.stamp    = header.stamp;
+            tf_msg.header.frame_id = odom_frame_;
+            tf_msg.child_frame_id  = base_frame_;
+            tf_msg.transform.translation.x = t.x();
+            tf_msg.transform.translation.y = t.y();
+            tf_msg.transform.translation.z = t.z();
+            tf_msg.transform.rotation.x    = q.x();
+            tf_msg.transform.rotation.y    = q.y();
+            tf_msg.transform.rotation.z    = q.z();
+            tf_msg.transform.rotation.w    = q.w();
+            tf_broadcaster_->sendTransform(tf_msg);
+        }
     }
 
     void publishLoopConstraints(int latest_id, int closest_id)
@@ -1933,6 +2000,7 @@ private:
     // GICP sanity check thresholds
     double gicp_max_correction_dist_{1.0};   // meters
     double gicp_max_correction_angle_{15.0}; // degrees
+    double gicp_fitness_score_{0.0};         // reject scan if VGICP score exceeds this (0 = disabled)
 
     int lost_frames_{0};
     int max_lost_frames{50};
@@ -1945,6 +2013,8 @@ private:
     bool use_ekf_{true};
     bool ekf_z_{false};
     bool debug{false};
+    bool publish_tf_{false};
+    std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
     // Visual odometry
     bool   use_vo_{false};
