@@ -102,41 +102,41 @@ def launch_setup(context, *args, **kwargs):
         ),
 
         #### Map TF (odom_tf.py listens to /initialpose to update this) ####
-        # Node(
-        #     package='sonar_localization',
-        #     executable='odom_tf',
-        #     name='map_tf',
-        #     namespace=ns,
-        #     output='screen',
-        #     parameters=[{
-        #         'parent_frame': '/world',
-        #         'child_frame':  '/icp_map',
-        #         'use_sim_time': sim_time,
-        #         'init_x':       init_x,
-        #         'init_y':       init_y,
-        #         'init_z':       init_z,
-        #         'init_yaw':     init_yaw,
-        #         'init_roll':    init_roll,
-        #         'init_pitch':   init_pitch,
-        #     }]
-        # ),
+        Node(
+            package='sonar_localization',
+            executable='odom_tf',
+            name='map_tf',
+            namespace=ns,
+            output='screen',
+            parameters=[{
+                'parent_frame': '/world',
+                'child_frame':  '/icp_map',
+                'use_sim_time': sim_time,
+                'init_x':       init_x,
+                'init_y':       init_y,
+                'init_z':       init_z,
+                'init_yaw':     init_yaw,
+                'init_roll':    init_roll,
+                'init_pitch':   init_pitch,
+            }]
+        ),
 
         #### Prior map publisher ####
-        # Node(
-        #     package='sonar_localization',
-        #     executable='prior_map_publisher',
-        #     name='prior_map_publisher',
-        #     namespace=ns,
-        #     output='screen',
-        #     parameters=[{
-        #         'prior_map_path':        map_file,
-        #         'map_topic':             '/prior_map',
-        #         'map_frame':             '/world',
-        #         'prior_map_resolution':  0.05,
-        #         'is_ned':                False,
-        #         'use_sim_time':          sim_time,
-        #     }]
-        # ),
+        Node(
+            package='sonar_localization',
+            executable='prior_map_publisher',
+            name='prior_map_publisher',
+            namespace=ns,
+            output='screen',
+            parameters=[{
+                'prior_map_path':        map_file,
+                'map_topic':             '/prior_map',
+                'map_frame':             '/world',
+                'prior_map_resolution':  0.05,
+                'is_ned':                False,
+                'use_sim_time':          sim_time,
+            }]
+        ),
 
         #### SLAM node (tight = localization_imu_pre, loose = loopclosure_vgicp) ####
         Node(
@@ -156,11 +156,11 @@ def launch_setup(context, *args, **kwargs):
             namespace=ns,
             output='screen',
             parameters=[{
-                'global_map_topic':  '/vgicp_full_map',  # pre-built map published by SLAM node
+                'global_map_topic':  '/prior_map',  # pre-built map published by SLAM node
                 'slam_map_topic':    'vgicp_sub_map',
                 'initialpose_topic': '/initialpose',
                 'child_frame':       '/icp_map',
-                'period':            5.0,
+                'period':            3.0,
                 'voxel_size':        0.3,
                 'fitness_threshold': 0.8,
                 'max_corr_dist':     3.0,

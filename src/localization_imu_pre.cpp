@@ -42,6 +42,7 @@
 #include <gtsam/navigation/ImuBias.h>
 #include <gtsam/navigation/PreintegrationParams.h>
 #include <gtsam/navigation/AttitudeFactor.h>
+#include <gtsam/base/numericalDerivative.h>
 
 #include <sensor_msgs/msg/imu.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
@@ -75,31 +76,12 @@ public:
         boost::optional<gtsam::Matrix&> H1 = boost::none,
         boost::optional<gtsam::Matrix&> H2 = boost::none) const override
     {
-        // Rotate world velocity into body frame: v_body_est = R^T * v_world
-        gtsam::Matrix3 R    = pose.rotation().matrix();
-        gtsam::Vector3 v_body_est = R.transpose() * vel_world;
-
-        // Analytical Jacobians
-        // d(error)/d(vel_world): R^T   (3x3, maps to the 3 translation cols of H2 which is 3x6)
-        if (H2) {
-            gtsam::Matrix36 J2 = gtsam::Matrix36::Zero();
-            J2.rightCols(3) = R.transpose();  // only translation part of Pose3 is irrelevant here
-            // Actually vel_world is Vector3, so H2 is 3x3
-            *H2 = R.transpose();
-        }
-        // d(error)/d(pose): only rotation matters — d(R^T v)/d(δω) = skew(v_body_est)
-        if (H1) {
-            gtsam::Matrix36 J1 = gtsam::Matrix36::Zero();
-            // d(R^T v)/d(δω) under right-perturbation = +skew(v_body_est)
-            J1.leftCols(3) <<  0.0,              -v_body_est(2),  v_body_est(1),
-                                v_body_est(2),    0.0,            -v_body_est(0),
-                               -v_body_est(1),    v_body_est(0),   0.0;
-            *H1 = J1;
-        }
-
-        // Residual: estimated body velocity - measured body velocity
-        // Paper eq(6): rv = Di_v_tilde - vi  (we flip sign so GTSAM minimises ||r||)
-        return v_body_est - v_measured_body_;
+        auto f = [this](const gtsam::Pose3& p, const gtsam::Vector3& v) -> gtsam::Vector3 {
+            return p.rotation().matrix().transpose() * v - v_measured_body_;
+        };
+        if (H1) *H1 = gtsam::numericalDerivative21<gtsam::Vector3, gtsam::Pose3, gtsam::Vector3>(f, pose, vel_world);
+        if (H2) *H2 = gtsam::numericalDerivative22<gtsam::Vector3, gtsam::Pose3, gtsam::Vector3>(f, pose, vel_world);
+        return f(pose, vel_world);
     }
 };
 
@@ -141,30 +123,19 @@ public:
         boost::optional<gtsam::Matrix&> H1 = boost::none,
         boost::optional<gtsam::Matrix&> H2 = boost::none) const override
     {
-        Eigen::Matrix3d Ri  = pose_i.rotation().matrix();
-        Eigen::Matrix3d Rj  = pose_j.rotation().matrix();
-        Eigen::Vector3d pi  = pose_i.translation();
-        Eigen::Vector3d pj  = pose_j.translation();
-        Eigen::Matrix3d RiT = Ri.transpose();
-
-        // hDt(Xi, Xj) from paper equation (8):
-        // R_ID * [D_pDC - R_DC * Ri^T * Rj * R_DC^T * D_pDC
-        //         + R_DC * (Ri^T * pj - Ri^T * pi)]
-        Eigen::Vector3d h_Dt =
-            R_ID_ * (D_pDC_
-                   - R_DC_ * RiT * Rj * R_DC_.transpose() * D_pDC_
-                   + R_DC_ * (RiT * pj - RiT * pi));
-
-        // Residual: pre-integrated measurement - model prediction
-        Eigen::Vector3d error = preint_dp_ - h_Dt;
-
-        // Jacobians — numerical differentiation (H = nullptr → GTSAM computes them)
-        // Set to zero for now; GTSAM will fall back to numerical if left unset.
-        // For production, derive analytically from the expression above.
-        if (H1) *H1 = gtsam::Matrix36::Zero();  // 3x6 (3 residual, 6 pose DoF)
-        if (H2) *H2 = gtsam::Matrix36::Zero();
-
-        return error;
+        auto f = [this](const gtsam::Pose3& pi, const gtsam::Pose3& pj) -> gtsam::Vector3 {
+            Eigen::Matrix3d Ri  = pi.rotation().matrix();
+            Eigen::Matrix3d Rj  = pj.rotation().matrix();
+            Eigen::Matrix3d RiT = Ri.transpose();
+            Eigen::Vector3d h_Dt =
+                R_ID_ * (D_pDC_
+                       - R_DC_ * RiT * Rj * R_DC_.transpose() * D_pDC_
+                       + R_DC_ * (RiT * pj.translation() - RiT * pi.translation()));
+            return preint_dp_ - h_Dt;
+        };
+        if (H1) *H1 = gtsam::numericalDerivative21<gtsam::Vector3, gtsam::Pose3, gtsam::Pose3>(f, pose_i, pose_j);
+        if (H2) *H2 = gtsam::numericalDerivative22<gtsam::Vector3, gtsam::Pose3, gtsam::Pose3>(f, pose_i, pose_j);
+        return f(pose_i, pose_j);
     }
 };
 
@@ -185,10 +156,11 @@ public:
         const gtsam::Pose3 & pose,
         boost::optional<gtsam::Matrix&> H = boost::none) const override
     {
-        if (H) {
-            *H = (gtsam::Matrix16() << 0, 0, 0, 0, 0, 1).finished();
-        }
-        return (gtsam::Vector1() << pose.translation().z() - z_measured_).finished();
+        auto f = [this](const gtsam::Pose3& p) -> gtsam::Vector1 {
+            return (gtsam::Vector1() << p.translation().z() - z_measured_).finished();
+        };
+        if (H) *H = gtsam::numericalDerivative11<gtsam::Vector1, gtsam::Pose3>(f, pose);
+        return f(pose);
     }
 };
 
@@ -502,6 +474,16 @@ public:
         ahrs_noise_rp_  = this->declare_parameter<double>("ahrs.noise_rp",    0.02); // ~1°
         ahrs_noise_yaw_ = this->declare_parameter<double>("ahrs.noise_yaw",   0.1);  // ~6°
 
+        // Accelerometer gravity prior — constrains roll+pitch from low-pass-filtered accel
+        // Prevents gravity from leaking onto horizontal axes when AHRS is off
+        use_accel_gravity_   = this->declare_parameter<bool>  ("ahrs.use_accel_gravity",  false);
+        accel_gravity_noise_ = this->declare_parameter<double>("ahrs.accel_gravity_noise", 0.1);  // [rad]
+        if (use_accel_gravity_) {
+            RCLCPP_INFO(get_logger(),
+                "Accelerometer gravity prior enabled (ORB-SLAM3 style): noise=%.4f rad",
+                accel_gravity_noise_);
+        }
+
         // Depth factor parameters
         use_depth_      = this->declare_parameter<bool>  ("depth.use_depth",  false);
         depth_noise_    = this->declare_parameter<double>("depth.noise",       0.05); // [m]
@@ -626,6 +608,9 @@ private:
         // AHRS attitude noise — 2D (on Unit3 tangent space), constrains roll+pitch only
         // AttitudeFactor leaves yaw free; GICP handles yaw via scan matching
         ahrsNoise_ = gtsam::noiseModel::Isotropic::Sigma(2, ahrs_noise_rp_);
+
+        // Accelerometer gravity prior noise — same tangent-space dimension as AHRS
+        accelGravityNoise_ = gtsam::noiseModel::Isotropic::Sigma(2, accel_gravity_noise_);
 
         // Depth factor noise — 1D, scalar sigma in metres
         depthNoise_ = gtsam::noiseModel::Isotropic::Sigma(1, depth_noise_);
@@ -895,6 +880,35 @@ private:
                         gtsam::Unit3(0, 0, 1),  // nZ    — gravity direction in world (Z-down)
                         ahrsNoise_,              // noise model
                         g_body));                // bRef  — gravity direction in body frame
+                }
+            }
+
+            // Accelerometer gravity prior (ORB-SLAM3 style) — mean accel over the
+            // keyframe interval approximates gravity direction when motion is slow.
+            // A magnitude check rejects windows dominated by dynamic acceleration.
+            if (use_accel_gravity_ && !use_ahrs_) {
+                gtsam::Vector3 g_mean;
+                bool g_ok = false;
+                {
+                    std::lock_guard<std::mutex> ilk(imu_mutex_);
+                    if (accel_count_ > 0) {
+                        g_mean = accel_sum_ / static_cast<double>(accel_count_);
+                        double g_norm = g_mean.norm();
+                        // Accept only when mean magnitude is within 20% of g
+                        if (std::abs(g_norm - imu_gravity_) < 0.2 * imu_gravity_) {
+                            g_mean /= g_norm;
+                            g_ok = true;
+                        }
+                    }
+                    accel_sum_   = gtsam::Vector3::Zero();
+                    accel_count_ = 0;
+                }
+                if (g_ok) {
+                    gtSAMgraph_.add(gtsam::Pose3AttitudeFactor(
+                        X(current_id),
+                        gtsam::Unit3(0, 0, 1),    // gravity in world (Z-down)
+                        accelGravityNoise_,
+                        gtsam::Unit3(g_mean)));   // mean gravity direction in body frame
                 }
             }
 
@@ -1324,6 +1338,15 @@ private:
         if (scan_preint_) scan_preint_->integrateMeasurement(accel, gyro, dt);
         imu_last_time_ = t;
 
+        // ── Accelerometer gravity accumulation (ORB-SLAM3 style) ─────────────
+        // Sum raw accel samples between keyframes. AddKeyFrame computes the mean,
+        // which approximates the gravity direction when motion is slow.
+        // imu_mutex_ is already held here.
+        if (use_accel_gravity_) {
+            accel_sum_   += accel;
+            accel_count_ += 1;
+        }
+
         // ── Accumulate gyro rotation for DVL pre-integration ─────────────────
         // Between DVL pings the vehicle rotates. We track this so each DVL
         // velocity sample is correctly rotated before being summed into ΔDi_p̄.
@@ -1609,7 +1632,7 @@ private:
         if (use_ekf_) {
             Eigen::Matrix4f ekf_delta = prev_ekf_pose_.inverse() * current_ekf_pose;
             initial_guess = current_global * ekf_delta;
-        } else if (use_imu_ && scan_preint_ && scan_preint_->deltaTij() > 0.001) {
+        } else if (use_dvl_) {
             bool dvl_ok;
             Eigen::Vector3f dvl_integrated;
             {
@@ -1619,7 +1642,7 @@ private:
             }
 
             if (dvl_ok) {
-                // Best case: gyro rotation + integrated DVL translation (full interval, not snapshot)
+                // Gyro rotation (deltaRij uses gyro only, NOT accelerometer) + DVL translation
                 gtsam::Rot3 delta_R;
                 {
                     std::lock_guard<std::mutex> ilk(imu_mutex_);
@@ -1633,12 +1656,7 @@ private:
                 scan_delta.block<3,1>(0,3) = t_delta;
                 initial_guess = current_global * scan_delta;
             } else {
-                // DVL dead — use gyro rotation only, zero translation.
-                // Avoids prev_velocity_ contamination; VGICP searches translation freely.
-                if (debug) {
-                    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-                        "DVL unavailable — using gyro-rotation-only prediction for initial guess");
-                }
+                // DVL dead — gyro rotation only, no translation prediction
                 gtsam::Rot3 delta_R;
                 {
                     std::lock_guard<std::mutex> ilk(imu_mutex_);
@@ -1654,6 +1672,17 @@ private:
             initial_guess = current_global * delta;
         } else {
             initial_guess = current_global;  // first scan — zero-motion
+        }
+
+        // Override Z with depth sensor when EKF is off — more reliable than DVL Z integration
+        if (!use_ekf_ && use_depth_) {
+            double depth_snap;
+            bool depth_ok = false;
+            {
+                std::lock_guard<std::mutex> lk(depth_mutex_);
+                if (has_depth_) { depth_snap = latest_depth_z_; depth_ok = true; }
+            }
+            if (depth_ok) initial_guess(2, 3) = static_cast<float>(depth_snap);
         }
 
         // 7. Snapshot local map
@@ -2111,6 +2140,15 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr ahrs_sub_;
     double ahrs_noise_rp_{0.02};   // ~1° sigma for roll and pitch
     double ahrs_noise_yaw_{0.1};   // kept for future full-orientation use
+
+    // ── Accelerometer gravity prior (ORB-SLAM3 style) ────────────────────────
+    // Protected by imu_mutex_. Accumulates raw accel samples between keyframes;
+    // AddKeyFrame computes the mean, checks |mean| ≈ g, then resets.
+    bool           use_accel_gravity_{false};
+    double         accel_gravity_noise_{0.1};           // [rad]
+    gtsam::Vector3 accel_sum_{gtsam::Vector3::Zero()};  // sum of body-frame accel samples
+    int            accel_count_{0};                     // number of samples in sum
+    gtsam::noiseModel::Isotropic::shared_ptr accelGravityNoise_;
 
     // IMU noise parameters (needed in initGTSAM which can run after constructor)
     double imu_accel_noise_{0.05},  imu_gyro_noise_{0.005};

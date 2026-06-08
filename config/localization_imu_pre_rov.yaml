@@ -114,7 +114,7 @@
 
     imu:
       use_imu: true            # set true to enable IMU preintegration
-      start_kf: 10           # keyframes to wait before activating ImuFactor (GICP warms up first)
+      start_kf: 0           # keyframes to wait before activating ImuFactor (GICP warms up first)
       accel_noise: 6.5e-2          # accelerometer white noise [m/s^2/sqrt(Hz)]
       gyro_noise:  8.7e-2          # gyroscope white noise [rad/s/sqrt(Hz)]
       accel_bias_noise: 1.35e-4  # accelerometer bias random walk (loosened for faster convergence)
@@ -130,8 +130,14 @@
 
     ahrs:
       use_ahrs: true           # set true to enable AHRS roll+pitch factor
-      noise_rp:  0.0061           # sigma [rad] for roll and pitch (~1°)
-      noise_yaw: 0.1            # sigma [rad] for yaw (~6°) — reserved for future use
+      noise_rp:  0.0061        # sigma [rad] for roll and pitch (~1°)
+      noise_yaw: 0.1           # sigma [rad] for yaw (~6°) — reserved for future use
+
+      # Accelerometer gravity prior — active only when use_ahrs is false
+      # Averages IMU accel between keyframes to estimate gravity direction (ORB-SLAM3 style)
+      # and adds a Pose3AttitudeFactor to prevent gravity leaking onto horizontal axes.
+      use_accel_gravity:  false  # set true when AHRS is off and use_imu is true
+      accel_gravity_noise: 0.1   # sigma [rad] — looser than AHRS since accel is noisier
 
     depth:
       use_depth: true          # set true to enable depth factor from depth_odom topic
