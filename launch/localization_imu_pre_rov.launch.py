@@ -112,7 +112,7 @@ def launch_setup(context, *args, **kwargs):
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_link_to_gss',
-            arguments=['0.0', '-0.106', '-0.2', '0.0', '0.0', '0.0', 'base_link', 'gnss'],
+            arguments=['0.0', '-0.106', '-0.2', '0.0', '0.0', '3.1415', 'base_link', 'gnss'],
             output='screen',
         ),
 
@@ -175,12 +175,25 @@ def launch_setup(context, *args, **kwargs):
             executable='navsat_transform_node',
             name='navsat_transform_node',
             output='screen',
-            parameters=[navsat_config, {'use_sim_time': sim_time}],
+            parameters=[ekf_config_path, {'use_sim_time': sim_time}],
             remappings=[
                 ('imu',           '/dvl/imu'),
                 ('gps/fix',            'fix'),
                 ('odometry/filtered',  'odometry/filtered'),
             ],
+        ),
+
+        Node(
+            package='sonar_localization',
+            executable='odom_enu2ned',
+            name='odom_enu2ned',
+            output='screen',
+            parameters=[{
+                'input_topic':  '/odometry/gps',
+                'output_topic': '/odometry/gps_ned',
+                'output_frame': 'icp_map',
+                'use_sim_time': sim_time,
+            }],
         ),
     ]
 

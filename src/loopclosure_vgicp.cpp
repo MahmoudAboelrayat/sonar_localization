@@ -60,7 +60,7 @@ public:
         std::string deadreckoning_sub = this->declare_parameter<std::string>("topics.deadreckoining_sub", "/odometry/filtered");
         std::string map_pub_topic     = this->declare_parameter<std::string>("topics.map_pub",            "vgicp_global_map");
 
-        double map_res        = this->declare_parameter<double>("tuning.map_res",          0.1);
+        map_res        = this->declare_parameter<double>("tuning.map_res",          0.1);
         int    vgicp_threads  = this->declare_parameter<int>   ("tuning.vgicp_threads",    4);
         double vgicp_epsilon  = this->declare_parameter<double>("tuning.vgicp_epsilon",    1e-4);
         double vgicp_max_dist = this->declare_parameter<double>("tuning.vgicp_max_dist",   1.5);
@@ -436,7 +436,7 @@ private:
         // ── 2. Downsample history submap ──────────────────────────────────────
         pcl::PointCloud<pcl::PointXYZ>::Ptr history_ds(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::VoxelGrid<pcl::PointXYZ> ds_filter;
-        ds_filter.setLeafSize(0.2f, 0.2f, 0.2f);
+        ds_filter.setLeafSize(map_res, map_res, map_res);
         ds_filter.setInputCloud(history_cloud_world);
         ds_filter.filter(*history_ds);
 
@@ -575,7 +575,7 @@ private:
 
         pcl::PointCloud<pcl::PointXYZ>::Ptr downsampled(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::VoxelGrid<pcl::PointXYZ> vg;
-        vg.setLeafSize(0.2f, 0.2f, 0.2f);
+        vg.setLeafSize(static_cast<float>(map_res), static_cast<float>(map_res), static_cast<float>(map_res));
         vg.setInputCloud(full_map.makeShared());
         vg.filter(*downsampled);
 
@@ -975,6 +975,8 @@ private:
     // ── Config ────────────────────────────────────────────────────────────────
     std::string odom_frame_, base_frame_;
     bool        is_ned_{false};
+
+    double map_res{0.2};
 
     int    submap_size_{20};
     double kf_dist_thresh_{0.5}, kf_angle_thresh_{10.0};

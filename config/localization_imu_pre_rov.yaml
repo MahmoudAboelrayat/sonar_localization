@@ -4,7 +4,7 @@
     is_ned: false
     ekf_z: false
     loop_ekf_z: false
-    use_ekf: true
+    use_ekf:  true
     publish_tf: false
     ekf_max_age: 0.1
 
@@ -27,7 +27,7 @@
 
     tuning:
       map_res: 0.1
-      vgicp_threads: 8
+      vgicp_threads: 6
       vgicp_epsilon: 1e-4
       vgicp_max_dist: 1.5
       vgicp_max_iter: 100
@@ -82,7 +82,7 @@
       angle_thresh: 5.0        # degrees
 
     loop_closure:
-      use_lc: false
+      use_lc: true
       search_radius: 15.0
       fitness_score: 0.1
       history_gap: 40
@@ -141,13 +141,14 @@
 
     depth:
       use_depth: true          # set true to enable depth factor from depth_odom topic
-      noise: 0.05              # sigma [m] — typical pressure sensor ±5 cm
+      noise: 0.01              # sigma [m] — typical pressure sensor ±5 cm
 
     dvl:
       use_dvl: true            # set true to enable DVL velocity factor
       use_dvl_trans: true     # set true to also enable DVL pre-integrated translation factor
       max_vel: 2.0
-      noise_x: 0.001             # [m/s]
+      dvl_static_noise: false   # true = use noise_x/y/z params; false = use covariance from msg
+      noise_x: 0.001             # [m/s] — used only when dvl_static_noise: true
       noise_y: 0.001
       noise_z: 0.5
       trans_noise_x: 0.001        # [m] DVL translation noise x

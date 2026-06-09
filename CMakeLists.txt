@@ -292,6 +292,14 @@ install(PROGRAMS ${PROJECT_NAME}/camera2point.py
 install(PROGRAMS ${PROJECT_NAME}/gps_rec.py
         DESTINATION lib/${PROJECT_NAME}
         RENAME gps_rec)
+
+install(PROGRAMS ${PROJECT_NAME}/navsat_fix_abs_cov.py
+        DESTINATION lib/${PROJECT_NAME}
+        RENAME navsat_fix_abs_cov)
+
+install(PROGRAMS ${PROJECT_NAME}/odom_enu2ned.py
+        DESTINATION lib/${PROJECT_NAME}
+        RENAME odom_enu2ned)
 # Install Shared Directories
 install(DIRECTORY launch config rviz description
   DESTINATION share/${PROJECT_NAME}

@@ -169,6 +169,7 @@ struct Keyframe {
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud;
     int id;
     float ekf_z{0.0f};   // EKF depth at keyframe time — never overwritten by GTSAM
+    double stamp_sec{0.0};  // scan timestamp — used for path PoseStamped headers
 };
 
 class GicpOdomNode : public rclcpp::Node
@@ -431,6 +432,7 @@ public:
         use_dvl_       = this->declare_parameter<bool>("dvl.use_dvl",       false);
         use_dvl_trans_ = this->declare_parameter<bool>("dvl.use_dvl_trans", false);
         dvl_max_vel_   = this->declare_parameter<double>("dvl.max_vel", 3.0);  // reject readings above this [m/s]
+        dvl_static_noise_ = this->declare_parameter<bool>("dvl.dvl_static_noise", true);
         imu_max_accel_ = this->declare_parameter<double>("imu.max_accel", 50.0);  // reject spikes above this [m/s^2]
         imu_max_gyro_  = this->declare_parameter<double>("imu.max_gyro",  10.0);  // reject spikes above this [rad/s]
 
@@ -809,8 +811,9 @@ private:
                     if (has_dvl_) { dvl_snap = latest_dvl_vel_body_; dvl_ok = true; }
                 }
                 if (dvl_ok) {
+                    auto noise = (dvl_static_noise_ || !latest_dvl_noise_) ? dvlNoise_ : latest_dvl_noise_;
                     gtSAMgraph_.add(DvlVelocityFactor(
-                        X(current_id), V(current_id), dvl_snap, dvlNoise_));
+                        X(current_id), V(current_id), dvl_snap, noise));
                     if (debug) {
                         RCLCPP_INFO(get_logger(),
                             "[DVL vel factor] kf=%d  body-vel=[%.4f, %.4f, %.4f] m/s",
@@ -1008,10 +1011,11 @@ private:
         }
 
         Keyframe kf;
-        kf.pose  = optimised_mat;
-        kf.cloud = cloud;
-        kf.id    = current_id;
-        kf.ekf_z = ekf_z;
+        kf.pose      = optimised_mat;
+        kf.cloud     = cloud;
+        kf.id        = current_id;
+        kf.ekf_z     = ekf_z;
+        kf.stamp_sec = stamp_sec;
         keyframes_.push_back(kf);
 
         // ── LIO-SAM correctPoses() equivalent ────────────────────────────────
@@ -1282,7 +1286,10 @@ private:
         for (auto & kf : keyframes_) {
             geometry_msgs::msg::PoseStamped ps;
             ps.header.frame_id = odom_frame_;
-            ps.header.stamp    = path_msg.header.stamp;
+            if (kf.stamp_sec > 0.0)
+                ps.header.stamp = rclcpp::Time(static_cast<uint64_t>(kf.stamp_sec * 1e9));
+            else
+                ps.header.stamp = path_msg.header.stamp;
 
             Eigen::Vector3f    t(kf.pose.block<3,1>(0,3));
             Eigen::Quaternionf q(kf.pose.block<3,3>(0,0));
@@ -1336,6 +1343,7 @@ private:
 
         preint_->integrateMeasurement(accel, gyro, dt);
         if (scan_preint_) scan_preint_->integrateMeasurement(accel, gyro, dt);
+        latest_gyro_body_ = gyro;
         imu_last_time_ = t;
 
         // ── Accelerometer gravity accumulation (ORB-SLAM3 style) ─────────────
@@ -1417,11 +1425,25 @@ private:
             return;
         }
 
-        // Update velocity latch
+        // Update velocity latch and optionally noise from message covariance
         {
             std::lock_guard<std::mutex> lk(dvl_mutex_);
             latest_dvl_vel_body_ = vel;
             has_dvl_ = true;
+
+            if (!dvl_static_noise_) {
+                // TwistWithCovariance layout: [vx,vy,vz,ωx,ωy,ωz] — variances at [0,7,14]
+                double var_x = msg->twist.covariance[0];
+                double var_y = msg->twist.covariance[7];
+                double var_z = msg->twist.covariance[14];
+                // Guard against zero or negative variances from the sensor
+                const double min_var = 1e-6;
+                var_x = std::max(var_x, min_var);
+                var_y = std::max(var_y, min_var);
+                var_z = std::max(var_z, min_var);
+                latest_dvl_noise_ = gtsam::noiseModel::Diagonal::Sigmas(
+                    (gtsam::Vector(3) << std::sqrt(var_x), std::sqrt(var_y), std::sqrt(var_z)).finished());
+            }
         }
 
         // ── DVL pre-integration (equation 8, AQUA-SLAM) ──────────────────────
@@ -1628,50 +1650,69 @@ private:
             std::lock_guard<std::mutex> pose_lock(pose_mutex_);
             current_global = global_pose_;
         }
-        Eigen::Matrix4f initial_guess;
+        Eigen::Matrix4f initial_guess = current_global;
         if (use_ekf_) {
+            // EKF: apply odometry delta from the EKF pose
             Eigen::Matrix4f ekf_delta = prev_ekf_pose_.inverse() * current_ekf_pose;
             initial_guess = current_global * ekf_delta;
-        } else if (use_dvl_) {
-            bool dvl_ok;
-            Eigen::Vector3f dvl_integrated;
+
+        } else if (use_dvl_ && use_imu_ && scan_preint_) {
+            // Case 1: DVL + IMU
+            //   ΔR = deltaRij() — bias-corrected accumulated rotation at IMU rate (200 Hz)
+            //   Δp = scan_dvl_dp_ — DVL displacement integrated in scan-start body frame
+            gtsam::Rot3 delta_R;
+            {
+                std::lock_guard<std::mutex> ilk(imu_mutex_);
+                delta_R = scan_preint_->deltaRij();
+            }
+            Eigen::Matrix3f delta_R_mat = delta_R.matrix().cast<float>();
+            Eigen::Vector3f dvl_dp = Eigen::Vector3f::Zero();
+            bool dvl_ok = false;
             {
                 std::lock_guard<std::mutex> dlk(dvl_mutex_);
-                dvl_ok       = scan_dvl_valid_;
-                dvl_integrated = scan_dvl_dp_;
+                dvl_ok = scan_dvl_valid_;
+                dvl_dp = scan_dvl_dp_;
             }
-
+            Eigen::Matrix4f scan_delta = Eigen::Matrix4f::Identity();
+            scan_delta.block<3,3>(0,0) = delta_R_mat;
             if (dvl_ok) {
-                // Gyro rotation (deltaRij uses gyro only, NOT accelerometer) + DVL translation
-                gtsam::Rot3 delta_R;
-                {
-                    std::lock_guard<std::mutex> ilk(imu_mutex_);
-                    delta_R = scan_preint_->deltaRij();
-                }
-                Eigen::Matrix3f R_wb = current_global.block<3,3>(0,0);
-                Eigen::Vector3f t_delta = R_wb * dvl_integrated;
-
-                Eigen::Matrix4f scan_delta = Eigen::Matrix4f::Identity();
-                scan_delta.block<3,3>(0,0) = delta_R.matrix().cast<float>();
-                scan_delta.block<3,1>(0,3) = t_delta;
-                initial_guess = current_global * scan_delta;
-            } else {
-                // DVL dead — gyro rotation only, no translation prediction
-                gtsam::Rot3 delta_R;
-                {
-                    std::lock_guard<std::mutex> ilk(imu_mutex_);
-                    delta_R = scan_preint_->deltaRij();
-                }
-                Eigen::Matrix4f scan_delta = Eigen::Matrix4f::Identity();
-                scan_delta.block<3,3>(0,0) = delta_R.matrix().cast<float>();
-                initial_guess = current_global * scan_delta;
+                scan_delta.block<3,1>(0,3) = dvl_dp;
             }
+            initial_guess = current_global * scan_delta;
+        } else if (use_imu_ && scan_preint_) {
+            // Case 2: IMU only (no DVL)
+            //   Full preintegration: gravity + double-integrated accel + gyro rotation
+            //   p_guess = p_last + v_last*dt + ΔP_imu
+            //   R_guess = R_last * ΔR_imu
+            gtsam::NavState prop;
+            {
+                std::lock_guard<std::mutex> ilk(imu_mutex_);
+                prop = scan_preint_->predict(
+                    gtsam::NavState(matrix2Pose3(current_global), prev_velocity_),
+                    prev_bias_);
+            }
+            initial_guess = pose32Matrix(prop.pose());
+
+        } else if (use_dvl_) {
+            // DVL only, no IMU — accumulated body-frame displacement, rotation frozen
+            Eigen::Vector3f dvl_dp = Eigen::Vector3f::Zero();
+            bool dvl_ok = false;
+            {
+                std::lock_guard<std::mutex> dlk(dvl_mutex_);
+                dvl_ok = scan_dvl_valid_;
+                dvl_dp = scan_dvl_dp_;
+            }
+            if (dvl_ok) {
+                initial_guess.block<3,1>(0,3) +=
+                    current_global.block<3,3>(0,0) * dvl_dp;
+            }
+
         } else if (has_prev_scan_) {
-            // Constant velocity fallback — IMU not yet running
+            // Case 3: No IMU, no DVL — project last scan-to-scan delta forward
+            //   ΔT = T_{k-2}^{-1} * T_{k-1}
+            //   T_guess = T_{k-1} * ΔT
             Eigen::Matrix4f delta = prev_scan_pose_.inverse() * current_global;
             initial_guess = current_global * delta;
-        } else {
-            initial_guess = current_global;  // first scan — zero-motion
         }
 
         // Override Z with depth sensor when EKF is off — more reliable than DVL Z integration
@@ -1693,6 +1734,15 @@ private:
         }
 
         // 8. Run GICP
+        // Eigen::Vector3f    t_ig(initial_guess.block<3,1>(0,3));
+        // Eigen::Quaternionf q_ig(initial_guess.block<3,3>(0,0));
+        // Eigen::Vector3f    rpy = q_ig.toRotationMatrix().eulerAngles(0, 1, 2)
+        //                             * (180.0f / M_PI);
+        // RCLCPP_INFO(get_logger(),
+        //     "[InitGuess] xyz=[%.3f, %.3f, %.3f]  rpy=[%.2f, %.2f, %.2f] deg",
+        //     t_ig.x(), t_ig.y(), t_ig.z(),
+        //     rpy.x(), rpy.y(), rpy.z());
+
         vgicp_.setInputTarget(map_snapshot);
         vgicp_.setInputSource(filtered);
 
@@ -2070,6 +2120,7 @@ private:
 
     // ── IMU / DVL ─────────────────────────────────────────────────────────────
     bool   use_imu_{false}, use_dvl_{false}, use_dvl_trans_{false};
+    bool   dvl_static_noise_{true};
     double dvl_max_vel_{3.0};
     double imu_max_accel_{50.0};
     double imu_max_gyro_{10.0};
@@ -2114,6 +2165,7 @@ private:
     // GTSAM velocity + bias state (only used when use_imu_ || use_dvl_)
     gtsam::Vector3                  prev_velocity_{gtsam::Vector3::Zero()};
     gtsam::imuBias::ConstantBias    prev_bias_;
+    gtsam::Vector3                  latest_gyro_body_{gtsam::Vector3::Zero()};
 
     // Noise models for IMU / DVL / AHRS
     gtsam::noiseModel::Diagonal::shared_ptr  biasBetweenNoise_;
@@ -2121,6 +2173,7 @@ private:
     gtsam::noiseModel::Isotropic::shared_ptr velocityBetweenNoise_;
     gtsam::noiseModel::Diagonal::shared_ptr  biasPriorNoise_;
     gtsam::noiseModel::Diagonal::shared_ptr  dvlNoise_;
+    gtsam::noiseModel::Diagonal::shared_ptr  latest_dvl_noise_;  // per-message noise (used when !dvl_static_noise_)
     gtsam::noiseModel::Isotropic::shared_ptr ahrsNoise_;  // 2D — roll+pitch only
 
     // ── Depth ─────────────────────────────────────────────────────────────────
