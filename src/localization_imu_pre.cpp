@@ -169,7 +169,6 @@ struct Keyframe {
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud;
     int id;
     float ekf_z{0.0f};   // EKF depth at keyframe time — never overwritten by GTSAM
-    double stamp_sec{0.0};  // scan timestamp — used for path PoseStamped headers
 };
 
 class GicpOdomNode : public rclcpp::Node
@@ -376,6 +375,11 @@ public:
         odom_noise_x_     = this->declare_parameter<double>("gtsam.odom_noise_x",     0.5);
         odom_noise_y_     = this->declare_parameter<double>("gtsam.odom_noise_y",     0.5);
         odom_noise_z_     = this->declare_parameter<double>("gtsam.odom_noise_z",     0.3);
+        vgicp_static_noise_  = this->declare_parameter<bool>  ("gtsam.vgicp_static_noise",  true);
+        vgicp_noise_scale_   = this->declare_parameter<double>("gtsam.vgicp_noise_scale",    10.0);
+        vgicp_skip_score_    = this->declare_parameter<double>("gtsam.vgicp_skip_score",      0.0);  // 0 = disabled
+        vgicp_use_huber_     = this->declare_parameter<bool>  ("gtsam.vgicp_use_huber",      false);
+        vgicp_huber_k_       = this->declare_parameter<double>("gtsam.vgicp_huber_k",         1.345);
 
         lc_noise_roll_    = this->declare_parameter<double>("gtsam.lc_noise_roll",    0.01);
         lc_noise_pitch_   = this->declare_parameter<double>("gtsam.lc_noise_pitch",   0.01);
@@ -429,10 +433,10 @@ public:
         dvl_noise_x_  = this->declare_parameter<double>("dvl.noise_x",  0.05);
         dvl_noise_y_  = this->declare_parameter<double>("dvl.noise_y",  0.05);
         dvl_noise_z_  = this->declare_parameter<double>("dvl.noise_z",  0.05);
-        use_dvl_       = this->declare_parameter<bool>("dvl.use_dvl",       false);
-        use_dvl_trans_ = this->declare_parameter<bool>("dvl.use_dvl_trans", false);
-        dvl_max_vel_   = this->declare_parameter<double>("dvl.max_vel", 3.0);  // reject readings above this [m/s]
+        use_dvl_        = this->declare_parameter<bool>("dvl.use_dvl",          false);
+        use_dvl_trans_  = this->declare_parameter<bool>("dvl.use_dvl_trans",   false);
         dvl_static_noise_ = this->declare_parameter<bool>("dvl.dvl_static_noise", true);
+        dvl_max_vel_    = this->declare_parameter<double>("dvl.max_vel", 3.0);  // reject readings above this [m/s]
         imu_max_accel_ = this->declare_parameter<double>("imu.max_accel", 50.0);  // reject spikes above this [m/s^2]
         imu_max_gyro_  = this->declare_parameter<double>("imu.max_gyro",  10.0);  // reject spikes above this [rad/s]
 
@@ -472,9 +476,11 @@ public:
             D_pDC_.x(), D_pDC_.y(), D_pDC_.z());
 
         // AHRS attitude parameters
-        use_ahrs_       = this->declare_parameter<bool>  ("ahrs.use_ahrs",    false);
-        ahrs_noise_rp_  = this->declare_parameter<double>("ahrs.noise_rp",    0.02); // ~1°
-        ahrs_noise_yaw_ = this->declare_parameter<double>("ahrs.noise_yaw",   0.1);  // ~6°
+        use_ahrs_        = this->declare_parameter<bool>  ("ahrs.use_ahrs",         false);
+        ahrs_noise_rp_   = this->declare_parameter<double>("ahrs.noise_rp",         0.02);
+        ahrs_noise_yaw_  = this->declare_parameter<double>("ahrs.noise_yaw",        0.1);
+        ahrs_init_guess_ = this->declare_parameter<bool>  ("ahrs.use_ahrs_init_guess", false);
+        ahrs_fuse_yaw_   = this->declare_parameter<bool>  ("ahrs.ahrs_fuse_yaw",    false);
 
         // Accelerometer gravity prior — constrains roll+pitch from low-pass-filtered accel
         // Prevents gravity from leaking onto horizontal axes when AHRS is off
@@ -495,13 +501,14 @@ public:
         // IMU preintegration setup
         if (use_imu_) {
             // MakeSharedD = Z-down world frame: gravity = (0,0,+g) in world.
-            // Correct for this sensor: a_z ≈ -9.83 at rest → Z axis points DOWN.
-            auto imu_p = gtsam::PreintegrationParams::MakeSharedD(imu_gravity_);
-            imu_p->accelerometerCovariance = gtsam::I_3x3 * imu_accel_noise_ * imu_accel_noise_;
-            imu_p->gyroscopeCovariance     = gtsam::I_3x3 * imu_gyro_noise_  * imu_gyro_noise_;
-            imu_p->integrationCovariance   = gtsam::I_3x3 * 1e-6;
-            preint_      = std::make_shared<gtsam::PreintegratedImuMeasurements>(imu_p, gtsam::imuBias::ConstantBias());
-            scan_preint_ = std::make_shared<gtsam::PreintegratedImuMeasurements>(imu_p, gtsam::imuBias::ConstantBias());
+            // When AHRS is absent, gravity direction is re-estimated after imu_start_kf_
+            // frames via AQUA-SLAM dirG accumulation and then baked into these params.
+            imu_preint_params_ = gtsam::PreintegrationParams::MakeSharedD(imu_gravity_);
+            imu_preint_params_->accelerometerCovariance = gtsam::I_3x3 * imu_accel_noise_ * imu_accel_noise_;
+            imu_preint_params_->gyroscopeCovariance     = gtsam::I_3x3 * imu_gyro_noise_  * imu_gyro_noise_;
+            imu_preint_params_->integrationCovariance   = gtsam::I_3x3 * 1e-6;
+            preint_      = std::make_shared<gtsam::PreintegratedImuMeasurements>(imu_preint_params_, gtsam::imuBias::ConstantBias());
+            scan_preint_ = std::make_shared<gtsam::PreintegratedImuMeasurements>(imu_preint_params_, gtsam::imuBias::ConstantBias());
 
             auto imu_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
             rclcpp::SubscriptionOptions imu_sub_opt;
@@ -551,6 +558,31 @@ public:
                 });
             RCLCPP_INFO(get_logger(), "Depth factor enabled on %s", depth_topic.c_str());
         }
+
+        // ── Initial guess mode summary ────────────────────────────────────────
+        if (use_ekf_) {
+            RCLCPP_INFO(get_logger(), "[InitGuess] Mode: EKF odometry");
+        } else if (use_imu_) {
+            if (use_ahrs_) {
+                RCLCPP_INFO(get_logger(),
+                    "[InitGuess] Mode: IMU preintegration  |  AHRS roll+pitch prior  |  start_kf=%d",
+                    imu_start_kf_);
+            } else {
+                RCLCPP_INFO(get_logger(),
+                    "[InitGuess] Mode: IMU preintegration  |  AQUA-SLAM gravity init  |  start_kf=%d",
+                    imu_start_kf_);
+            }
+        } else if (use_dvl_) {
+            RCLCPP_INFO(get_logger(), "[InitGuess] Mode: DVL dead-reckoning");
+        } else {
+            RCLCPP_INFO(get_logger(), "[InitGuess] Mode: scan-to-scan constant velocity");
+        }
+
+        if (use_dvl_trans_) RCLCPP_INFO(get_logger(), "[InitGuess] + DVL pre-integrated translation factor");
+        if (use_depth_)     RCLCPP_INFO(get_logger(), "[InitGuess] + Depth Z override (%s)",
+                                use_ekf_ ? "absolute" : "relative to start");
+        if (use_vo_)        RCLCPP_INFO(get_logger(), "[InitGuess] + Visual odometry factor");
+        if (use_lc_)        RCLCPP_INFO(get_logger(), "[InitGuess] + Loop closure enabled");
 
         RCLCPP_INFO(get_logger(), "VGICP SLAM Node initialised.");
     }
@@ -638,7 +670,8 @@ private:
     void AddKeyFrame(const Eigen::Matrix4f & current_pose,
                      pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
                      float ekf_z = 0.0f,
-                     double stamp_sec = 0.0)
+                     double stamp_sec = 0.0,
+                     double gicp_score = 0.0)
     {
         // Check keyframe threshold — quick check without GTSAM lock
         {
@@ -692,6 +725,17 @@ private:
                 }
             }
 
+            // // ── Bootstrap: capture depth origin so the map frame's Z = 0 ────
+            // if (!use_ekf_ && use_depth_) {
+            //     std::lock_guard<std::mutex> lk(depth_mutex_);
+            //     if (has_depth_) {
+            //         depth_origin_ = latest_depth_z_;
+            //         RCLCPP_INFO(get_logger(),
+            //             "[Depth] origin captured = %.4f m  (all depth readings will be relative to this)",
+            //             depth_origin_);
+            //     }
+            // }
+
             // ── Bootstrap: priors on pose, velocity, bias ─────────────────────
             gtSAMgraph_.add(gtsam::PriorFactor<gtsam::Pose3>(
                 X(0), current_gtsam_pose, priorNoise_));
@@ -738,24 +782,122 @@ private:
                     used_imu_factor = true;
                 }
             } else if (use_imu_ && current_id < imu_start_kf_) {
+                // ── Phase 1: GICP-only warmup, AQUA-SLAM gravity accumulation ──────
+                // Accumulate dirG -= R_prev * deltaV_preintegrated across each interval.
+                // Real vehicle accelerations cancel over varied motion; what remains
+                // after summation is the gravity signal in world frame.
+                if (!use_ahrs_ && !gravity_initialized_ && imu_preint_params_) {
+                    {
+                        std::lock_guard<std::mutex> ilk(imu_mutex_);
+                        if (preint_ && preint_->deltaTij() > 0.01 && !keyframes_.empty()) {
+                            gtsam::Matrix3 R_prev =
+                                matrix2Pose3(keyframes_.back().pose).rotation().matrix();
+                            dirG_accum_ -= R_prev * preint_->deltaVij();
+                            gravity_init_count_++;
+                        }
+                    }
+
+                    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                        "[GravInit] kf %d/%d  dirG=[%.3f, %.3f, %.3f]  samples=%d",
+                        current_id, imu_start_kf_,
+                        dirG_accum_.x(), dirG_accum_.y(), dirG_accum_.z(),
+                        gravity_init_count_);
+
+                    // ── Phase 2: finalise at last warmup frame ────────────────────
+                    if (current_id == imu_start_kf_ - 1) {
+                        if (gravity_init_count_ >= 3) {
+                            gtsam::Vector3 gW = dirG_accum_.normalized();
+                            // Bake the estimated gravity direction into the preintegration params.
+                            // n_gravity is in the world/nav frame — units: m/s².
+                            imu_preint_params_->n_gravity = imu_gravity_ * gW;
+
+                            // Reset both preintegrators so Phase 3 integrates with
+                            // the corrected gravity vector from this point forward.
+                            {
+                                std::lock_guard<std::mutex> ilk(imu_mutex_);
+                                preint_      = std::make_shared<gtsam::PreintegratedImuMeasurements>(
+                                    imu_preint_params_, prev_bias_);
+                                scan_preint_ = std::make_shared<gtsam::PreintegratedImuMeasurements>(
+                                    imu_preint_params_, prev_bias_);
+                            }
+                            gravity_initialized_ = true;
+
+                            double tilt_deg = std::acos(std::max(-1.0, std::min(1.0,
+                                gW.dot(gtsam::Vector3(0, 0, 1))))) * 180.0 / M_PI;
+                            RCLCPP_INFO(get_logger(),
+                                "[GravInit] Gravity initialised from %d frames. "
+                                "gW=[%.4f, %.4f, %.4f]  tilt=%.2f° from Z-down. "
+                                "ImuFactor activates next keyframe.",
+                                gravity_init_count_,
+                                gW.x(), gW.y(), gW.z(), tilt_deg);
+                        } else {
+                            gravity_initialized_ = true;  // skip retry — keep MakeSharedD default
+                            RCLCPP_WARN(get_logger(),
+                                "[GravInit] Only %d valid intervals collected — "
+                                "keeping default Z-down gravity. "
+                                "Increase imu.start_kf or ensure more motion during warmup.",
+                                gravity_init_count_);
+                        }
+                    }
+                }
+
                 if (debug) {
                     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
-                        "[IMU warmup] kf=%d/%d — using GICP odometry until pose is reliable",
+                        "[IMU warmup] kf=%d/%d — GICP-only, collecting gravity direction",
                         current_id, imu_start_kf_);
                 }
             }
 
             gtsam::Pose3 prev_gtsam = matrix2Pose3(keyframes_.back().pose);
             gtsam::Pose3 relative   = prev_gtsam.between(current_gtsam_pose);
-            gtSAMgraph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
-                X(current_id-1), X(current_id), relative, odomNoise_));
-            if (debug) {
-                gtsam::Vector3 dt = relative.translation();
-                gtsam::Vector3 rpy = relative.rotation().rpy();
-                RCLCPP_INFO(get_logger(),
-                    "[VGICP factor] kf=%d  dt=[%.4f, %.4f, %.4f] m  drpy=[%.3f, %.3f, %.3f] deg",
-                    current_id, dt.x(), dt.y(), dt.z(),
-                    rpy(0)*180.0/M_PI, rpy(1)*180.0/M_PI, rpy(2)*180.0/M_PI);
+
+            // Layer 1 — skip BetweenFactor entirely when match is too unreliable.
+            // IMU / DVL factors still constrain the pose; we just don't let a bad
+            // scan measurement drag the graph.
+            bool skip_scan_factor = (vgicp_skip_score_ > 0.0 && gicp_score > vgicp_skip_score_);
+
+            if (skip_scan_factor) {
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 500,
+                    "[VGICP factor] kf=%d  SKIPPED (score=%.4f > skip_thresh=%.4f) — "
+                    "IMU/DVL only this keyframe",
+                    current_id, gicp_score, vgicp_skip_score_);
+            } else {
+                // Layer 2 — scale sigma by fitness score so poor-but-accepted matches
+                // carry less weight: sigma *= (1 + score * scale).
+                gtsam::noiseModel::Diagonal::shared_ptr scan_noise = odomNoise_;
+                if (!vgicp_static_noise_ && gicp_score > 0.0) {
+                    double s = 1.0 + gicp_score * vgicp_noise_scale_;
+                    scan_noise = gtsam::noiseModel::Diagonal::Sigmas(
+                        (gtsam::Vector(6) << odom_noise_roll_  * s, odom_noise_pitch_ * s,
+                                             odom_noise_yaw_   * s, odom_noise_x_     * s,
+                                             odom_noise_y_     * s, odom_noise_z_     * s).finished());
+                }
+
+                // Layer 3 — Huber robust kernel limits the influence of any remaining
+                // outlier scans; residuals beyond huber_k are penalised linearly rather
+                // than quadratically so a single bad factor cannot dominate the graph.
+                gtsam::noiseModel::Base::shared_ptr factor_noise = scan_noise;
+                if (vgicp_use_huber_) {
+                    factor_noise = gtsam::noiseModel::Robust::Create(
+                        gtsam::noiseModel::mEstimator::Huber::Create(vgicp_huber_k_),
+                        scan_noise);
+                }
+
+                gtSAMgraph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
+                    X(current_id-1), X(current_id), relative, factor_noise));
+
+                if (debug) {
+                    gtsam::Vector3 dt = relative.translation();
+                    gtsam::Vector3 rpy = relative.rotation().rpy();
+                    double scale = (!vgicp_static_noise_ && gicp_score > 0.0)
+                        ? (1.0 + gicp_score * vgicp_noise_scale_) : 1.0;
+                    RCLCPP_INFO(get_logger(),
+                        "[VGICP factor] kf=%d  dt=[%.4f, %.4f, %.4f] m  "
+                        "drpy=[%.3f, %.3f, %.3f] deg  score=%.4f  noise_scale=%.2f%s",
+                        current_id, dt.x(), dt.y(), dt.z(),
+                        rpy(0)*180.0/M_PI, rpy(1)*180.0/M_PI, rpy(2)*180.0/M_PI,
+                        gicp_score, scale, vgicp_use_huber_ ? "  [Huber]" : "");
+                }
             }
 
             // Also add IMU factor if available — they work together
@@ -811,9 +953,10 @@ private:
                     if (has_dvl_) { dvl_snap = latest_dvl_vel_body_; dvl_ok = true; }
                 }
                 if (dvl_ok) {
-                    auto noise = (dvl_static_noise_ || !latest_dvl_noise_) ? dvlNoise_ : latest_dvl_noise_;
+                    auto dvl_factor_noise = (!dvl_static_noise_ && latest_dvl_noise_)
+                        ? latest_dvl_noise_ : dvlNoise_;
                     gtSAMgraph_.add(DvlVelocityFactor(
-                        X(current_id), V(current_id), dvl_snap, noise));
+                        X(current_id), V(current_id), dvl_snap, dvl_factor_noise));
                     if (debug) {
                         RCLCPP_INFO(get_logger(),
                             "[DVL vel factor] kf=%d  body-vel=[%.4f, %.4f, %.4f] m/s",
@@ -915,7 +1058,9 @@ private:
                 }
             }
 
-            // Depth factor — constrains Z translation to barometric/pressure depth
+            // Depth factor — constrains Z translation to barometric/pressure depth.
+            // When EKF is off, the map frame Z=0 is the starting depth, so subtract
+            // depth_origin_ to keep the factor consistent with the initial guess and map frame.
             if (use_depth_) {
                 double depth_snap;
                 bool depth_ok = false;
@@ -924,10 +1069,12 @@ private:
                     if (has_depth_) { depth_snap = latest_depth_z_; depth_ok = true; }
                 }
                 if (depth_ok) {
-                    gtSAMgraph_.add(DepthFactor(X(current_id), depth_snap, depthNoise_));
+                    double depth_z = use_ekf_ ? depth_snap : (depth_snap - depth_origin_);
+                    gtSAMgraph_.add(DepthFactor(X(current_id), depth_z, depthNoise_));
                     if (debug) {
                         RCLCPP_INFO(get_logger(),
-                            "[Depth factor] kf=%d  z=%.4f m", current_id, depth_snap);
+                            "[Depth factor] kf=%d  z=%.4f m (raw=%.4f origin=%.4f)",
+                            current_id, depth_z, depth_snap, depth_origin_);
                     }
                 } else if (debug) {
                     RCLCPP_WARN(get_logger(),
@@ -1011,11 +1158,10 @@ private:
         }
 
         Keyframe kf;
-        kf.pose      = optimised_mat;
-        kf.cloud     = cloud;
-        kf.id        = current_id;
-        kf.ekf_z     = ekf_z;
-        kf.stamp_sec = stamp_sec;
+        kf.pose  = optimised_mat;
+        kf.cloud = cloud;
+        kf.id    = current_id;
+        kf.ekf_z = ekf_z;
         keyframes_.push_back(kf);
 
         // ── LIO-SAM correctPoses() equivalent ────────────────────────────────
@@ -1109,8 +1255,8 @@ private:
                 *history_cloud_world += transformed;
             }
         }
-
         RCLCPP_INFO(get_logger(), "Loop candidate: kf %d -> %d", latest_id, closest_id);
+        
 
         // ── 2. Downsample history submap ──────────────────────────────────────
         pcl::PointCloud<pcl::PointXYZ>::Ptr history_ds(new pcl::PointCloud<pcl::PointXYZ>);
@@ -1165,11 +1311,13 @@ private:
             "LC %s: score=%.4f | correction t=%.2fm angle=%.1fdeg",
             lc_matcher, score, correction_dist, correction_angle);
 
+
         if (score > lc_fitness_score_) {
             RCLCPP_INFO(get_logger(), "Loop closure refused: score %.4f > threshold %.4f",
                         score, lc_fitness_score_);
             return;
         }
+        
 
         // Reject if correction is unreasonably large — likely wrong minimum
         if (correction_dist > static_cast<float>(lc_max_correction_dist_) ||
@@ -1286,10 +1434,7 @@ private:
         for (auto & kf : keyframes_) {
             geometry_msgs::msg::PoseStamped ps;
             ps.header.frame_id = odom_frame_;
-            if (kf.stamp_sec > 0.0)
-                ps.header.stamp = rclcpp::Time(static_cast<uint64_t>(kf.stamp_sec * 1e9));
-            else
-                ps.header.stamp = path_msg.header.stamp;
+            ps.header.stamp    = path_msg.header.stamp;
 
             Eigen::Vector3f    t(kf.pose.block<3,1>(0,3));
             Eigen::Quaternionf q(kf.pose.block<3,3>(0,0));
@@ -1425,24 +1570,21 @@ private:
             return;
         }
 
-        // Update velocity latch and optionally noise from message covariance
+        // Update velocity latch (and optionally per-message noise)
         {
             std::lock_guard<std::mutex> lk(dvl_mutex_);
             latest_dvl_vel_body_ = vel;
             has_dvl_ = true;
 
             if (!dvl_static_noise_) {
-                // TwistWithCovariance layout: [vx,vy,vz,ωx,ωy,ωz] — variances at [0,7,14]
-                double var_x = msg->twist.covariance[0];
-                double var_y = msg->twist.covariance[7];
-                double var_z = msg->twist.covariance[14];
-                // Guard against zero or negative variances from the sensor
-                const double min_var = 1e-6;
-                var_x = std::max(var_x, min_var);
-                var_y = std::max(var_y, min_var);
-                var_z = std::max(var_z, min_var);
+                // TwistWithCovariance layout is 6×6 row-major:
+                // [vx,vy,vz,wx,wy,wz] — variance_vx at [0], vy at [7], vz at [14]
+                const auto& cov = msg->twist.covariance;
+                double sx = std::sqrt(std::max(cov[0],  1e-6));
+                double sy = std::sqrt(std::max(cov[7],  1e-6));
+                double sz = std::sqrt(std::max(cov[14], 1e-6));
                 latest_dvl_noise_ = gtsam::noiseModel::Diagonal::Sigmas(
-                    (gtsam::Vector(3) << std::sqrt(var_x), std::sqrt(var_y), std::sqrt(var_z)).finished());
+                    (gtsam::Vector(3) << sx, sy, sz).finished());
             }
         }
 
@@ -1638,7 +1780,7 @@ private:
                 std::lock_guard<std::mutex> pose_lock(pose_mutex_);
                 global_pose_ = bootstrap_pose;
             }
-            if (use_ekf_) prev_ekf_pose_ = current_ekf_pose;
+            prev_ekf_pose_ = current_ekf_pose;
             AddKeyFrame(bootstrap_pose, filtered, bootstrap_pose(2, 3),
                         rclcpp::Time(msg->header.stamp).seconds());
             return;
@@ -1656,7 +1798,8 @@ private:
             Eigen::Matrix4f ekf_delta = prev_ekf_pose_.inverse() * current_ekf_pose;
             initial_guess = current_global * ekf_delta;
 
-        } else if (use_dvl_ && use_imu_ && scan_preint_) {
+        } 
+        else if (use_dvl_ && use_imu_ && scan_preint_) {
             // Case 1: DVL + IMU
             //   ΔR = deltaRij() — bias-corrected accumulated rotation at IMU rate (200 Hz)
             //   Δp = scan_dvl_dp_ — DVL displacement integrated in scan-start body frame
@@ -1679,7 +1822,8 @@ private:
                 scan_delta.block<3,1>(0,3) = dvl_dp;
             }
             initial_guess = current_global * scan_delta;
-        } else if (use_imu_ && scan_preint_) {
+        } 
+        else if (use_imu_ && scan_preint_) {
             // Case 2: IMU only (no DVL)
             //   Full preintegration: gravity + double-integrated accel + gyro rotation
             //   p_guess = p_last + v_last*dt + ΔP_imu
@@ -1715,7 +1859,10 @@ private:
             initial_guess = current_global * delta;
         }
 
-        // Override Z with depth sensor when EKF is off — more reliable than DVL Z integration
+        // Override Z with depth sensor when EKF is off — more reliable than DVL Z integration.
+        // Use relative depth (depth - depth_origin_) so that Z=0 is the starting position,
+        // consistent with the map frame. Raw absolute depth would offset every initial guess
+        // by the deployment depth, causing VGICP corrections to exceed the rejection threshold.
         if (!use_ekf_ && use_depth_) {
             double depth_snap;
             bool depth_ok = false;
@@ -1723,7 +1870,52 @@ private:
                 std::lock_guard<std::mutex> lk(depth_mutex_);
                 if (has_depth_) { depth_snap = latest_depth_z_; depth_ok = true; }
             }
-            if (depth_ok) initial_guess(2, 3) = static_cast<float>(depth_snap);
+            if (depth_ok) initial_guess(2, 3) = static_cast<float>(depth_snap - depth_origin_);
+        }
+
+        // ── Override initial guess rotation with AHRS roll+pitch ─────────────
+        // AHRS gives gravity-referenced roll and pitch — no drift, no bias.
+        // Keep yaw from IMU preintegration unless ahrs_fuse_yaw_ is set (mag-based AHRS).
+        // This prevents accumulated gyro bias from corrupting the initial guess rotation
+        // during fast manoeuvres, while still using DVL/IMU for translation.
+        // if (!use_ekf_ && ahrs_init_guess_ && has_ahrs_) {
+        //     gtsam::Rot3 ahrs_snap;
+        //     {
+        //         std::lock_guard<std::mutex> lk(ahrs_mutex_);
+        //         ahrs_snap = latest_ahrs_rot_;
+        //     }
+        //     gtsam::Rot3 ig_rot = matrix2Pose3(initial_guess).rotation();
+        //     double yaw = ahrs_fuse_yaw_ ? ahrs_snap.yaw() : ig_rot.yaw();
+        //     gtsam::Rot3 fused = gtsam::Rot3::RzRyRx(ahrs_snap.roll(), ahrs_snap.pitch(), yaw);
+        //     Eigen::Matrix3f fused_mat = fused.matrix().cast<float>();
+        //     initial_guess.block<3,3>(0,0) = fused_mat;
+        // }
+
+        // ── Compare current initial guess vs what EKF delta would have given ──
+        if (!use_ekf_ && has_ekf_) {
+            Eigen::Matrix4f ekf_delta = prev_ekf_pose_.inverse() * current_ekf_pose;
+            Eigen::Matrix4f ekf_guess = current_global * ekf_delta;
+
+            Eigen::Vector3f t_cur = initial_guess.block<3,1>(0,3);
+            Eigen::Vector3f t_ekf = ekf_guess.block<3,1>(0,3);
+            Eigen::Vector3f diff  = t_cur - t_ekf;
+
+            // Extract yaw from each rotation matrix (Z-Y-X Euler, yaw = atan2(R10, R00))
+            float yaw_cur = std::atan2(initial_guess(1,0), initial_guess(0,0)) * 180.f / M_PI;
+            float yaw_ekf = std::atan2(ekf_guess(1,0),    ekf_guess(0,0))     * 180.f / M_PI;
+            float yaw_diff = yaw_cur - yaw_ekf;
+            // Wrap to [-180, 180]
+            if (yaw_diff >  180.f) yaw_diff -= 360.f;
+            if (yaw_diff < -180.f) yaw_diff += 360.f;
+
+            RCLCPP_INFO(get_logger(),
+                "[InitGuess cmp]  xyz_cur=[%.3f, %.3f, %.3f]  xyz_ekf=[%.3f, %.3f, %.3f]"
+                "  xyz_diff=[%.3f, %.3f, %.3f] m  |diff|=%.3f m"
+                "  yaw_cur=%.2f°  yaw_ekf=%.2f°  yaw_diff=%.2f°",
+                t_cur.x(), t_cur.y(), t_cur.z(),
+                t_ekf.x(), t_ekf.y(), t_ekf.z(),
+                diff.x(),  diff.y(),  diff.z(),  diff.norm(),
+                yaw_cur, yaw_ekf, yaw_diff);
         }
 
         // 7. Snapshot local map
@@ -1742,7 +1934,7 @@ private:
         //     "[InitGuess] xyz=[%.3f, %.3f, %.3f]  rpy=[%.2f, %.2f, %.2f] deg",
         //     t_ig.x(), t_ig.y(), t_ig.z(),
         //     rpy.x(), rpy.y(), rpy.z());
-
+    
         vgicp_.setInputTarget(map_snapshot);
         vgicp_.setInputSource(filtered);
 
@@ -1765,12 +1957,12 @@ private:
             correction_dist  > static_cast<float>(gicp_max_correction_dist_) ||
             correction_angle > static_cast<float>(gicp_max_correction_angle_));
 
-        if (debug && converged) {
-            RCLCPP_INFO(get_logger(),
-                "GICP | score: %.4f | correction: t=%.2fm angle=%.1fdeg | src: %zu | tgt: %zu",
-                gicp_score, correction_dist, correction_angle,
-                filtered->size(), map_snapshot->size());
-        }
+        // if (debug && converged) {
+        //     RCLCPP_INFO(get_logger(),
+        //         "GICP | score: %.4f | correction: t=%.2fm angle=%.1fdeg | src: %zu | tgt: %zu",
+        //         gicp_score, correction_dist, correction_angle,
+        //         filtered->size(), map_snapshot->size());
+        // }
 
         if (converged && !gicp_rejected) {
             lost_frames_ = 0;
@@ -1785,7 +1977,7 @@ private:
             publishOdometry(msg->header, score, false);
             float kf_z = use_ekf_ ? current_ekf_pose(2, 3) : current_global(2, 3);
             AddKeyFrame(current_global, filtered, kf_z,
-                        rclcpp::Time(msg->header.stamp).seconds());
+                        rclcpp::Time(msg->header.stamp).seconds(), score);
 
             if (map_pub_count_++ % 5 == 0) {
                 sensor_msgs::msg::PointCloud2 map_msg;
@@ -1798,7 +1990,7 @@ private:
                 global_map_pub_->publish(map_msg);
             }
 
-            if (use_ekf_) prev_ekf_pose_ = current_ekf_pose;
+            prev_ekf_pose_ = current_ekf_pose;   // always update — used for comparison print even when !use_ekf_
             prev_scan_pose_ = current_global;
             has_prev_scan_  = true;
             if (scan_preint_) {
@@ -1828,8 +2020,12 @@ private:
                 ++lost_frames_;
                 {
                     std::lock_guard<std::mutex> pose_lock(pose_mutex_);
-                    global_pose_ = initial_guess;
-                    if (use_ekf_) prev_ekf_pose_ = current_ekf_pose;
+                    // Keep the rotation from the last GTSAM-accepted pose — only advance
+                    // translation. Propagating a wrong yaw into global_pose_ here causes
+                    // cascading VGICP failures on subsequent scans.
+                    Eigen::Matrix4f safe_guess = initial_guess;
+                    safe_guess.block<3,3>(0,0) = current_global.block<3,3>(0,0);
+                    global_pose_ = safe_guess;
                 }
                 if (scan_preint_) {
                     std::lock_guard<std::mutex> ilk(imu_mutex_);
@@ -1869,7 +2065,7 @@ private:
                     std::lock_guard<std::mutex> pose_lock(pose_mutex_);
                     global_pose_ = use_ekf_ ? current_ekf_pose : initial_guess;
                 }
-                if (use_ekf_) prev_ekf_pose_ = current_ekf_pose;
+                prev_ekf_pose_ = current_ekf_pose;
 
                 {
                     std::lock_guard<std::mutex> gtsam_lock(gtsam_mutex_);
@@ -2113,6 +2309,11 @@ private:
 
     double odom_noise_roll_{0.1},  odom_noise_pitch_{0.1}, odom_noise_yaw_{0.3};
     double odom_noise_x_{0.5},     odom_noise_y_{0.5},     odom_noise_z_{0.3};
+    bool   vgicp_static_noise_{true};   // true = fixed odomNoise_; false = scale by fitness score
+    double vgicp_noise_scale_{10.0};    // multiplier: sigma *= (1 + score * scale)
+    double vgicp_skip_score_{0.0};      // skip BetweenFactor entirely if score > this (0 = disabled)
+    bool   vgicp_use_huber_{false};     // wrap noise model in Huber robust kernel
+    double vgicp_huber_k_{1.345};       // Huber threshold (1.345 = 95% efficiency on Gaussian)
 
     double lc_noise_roll_{0.01},   lc_noise_pitch_{0.01},  lc_noise_yaw_{0.01};
     double lc_noise_x_{0.05},      lc_noise_y_{0.05},      lc_noise_z_{0.05};
@@ -2120,7 +2321,6 @@ private:
 
     // ── IMU / DVL ─────────────────────────────────────────────────────────────
     bool   use_imu_{false}, use_dvl_{false}, use_dvl_trans_{false};
-    bool   dvl_static_noise_{true};
     double dvl_max_vel_{3.0};
     double imu_max_accel_{50.0};
     double imu_max_gyro_{10.0};
@@ -2131,6 +2331,12 @@ private:
     std::mutex                                              imu_mutex_;
     std::shared_ptr<gtsam::PreintegratedImuMeasurements>   preint_;
     std::shared_ptr<gtsam::PreintegratedImuMeasurements>   scan_preint_;  // resets each scan for initial-guess prediction
+
+    // AQUA-SLAM gravity initialisation
+    boost::shared_ptr<gtsam::PreintegrationParams>  imu_preint_params_;   // shared with preint_ / scan_preint_
+    gtsam::Vector3  dirG_accum_{gtsam::Vector3::Zero()};  // running sum for gravity direction estimation
+    int             gravity_init_count_{0};
+    bool            gravity_initialized_{false};
     Eigen::Vector3f   scan_dvl_dp_{Eigen::Vector3f::Zero()};   // integrated DVL translation since last scan
     Eigen::Matrix3d   scan_dvl_dR_{Eigen::Matrix3d::Identity()}; // accumulated rotation since last scan (for DVL integration)
     bool              scan_dvl_valid_{false};
@@ -2173,7 +2379,6 @@ private:
     gtsam::noiseModel::Isotropic::shared_ptr velocityBetweenNoise_;
     gtsam::noiseModel::Diagonal::shared_ptr  biasPriorNoise_;
     gtsam::noiseModel::Diagonal::shared_ptr  dvlNoise_;
-    gtsam::noiseModel::Diagonal::shared_ptr  latest_dvl_noise_;  // per-message noise (used when !dvl_static_noise_)
     gtsam::noiseModel::Isotropic::shared_ptr ahrsNoise_;  // 2D — roll+pitch only
 
     // ── Depth ─────────────────────────────────────────────────────────────────
@@ -2181,18 +2386,21 @@ private:
     double depth_noise_{0.05};
     bool   has_depth_{false};
     double latest_depth_z_{0.0};
+    double depth_origin_{0.0};   // captured at kf-0 when !use_ekf_; relative depth = latest - origin
     std::mutex depth_mutex_;
     rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr depth_sub_;
     gtsam::noiseModel::Isotropic::shared_ptr depthNoise_;
 
     // ── AHRS attitude ─────────────────────────────────────────────────────────
     bool   use_ahrs_{false};
+    bool   ahrs_init_guess_{false};  // use AHRS roll+pitch to correct initial_guess rotation
+    bool   ahrs_fuse_yaw_{false};    // also take yaw from AHRS (only for mag-based AHRS)
     bool   has_ahrs_{false};
     std::mutex ahrs_mutex_;
     gtsam::Rot3 latest_ahrs_rot_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr ahrs_sub_;
-    double ahrs_noise_rp_{0.02};   // ~1° sigma for roll and pitch
-    double ahrs_noise_yaw_{0.1};   // kept for future full-orientation use
+    double ahrs_noise_rp_{0.02};
+    double ahrs_noise_yaw_{0.1};
 
     // ── Accelerometer gravity prior (ORB-SLAM3 style) ────────────────────────
     // Protected by imu_mutex_. Accumulates raw accel samples between keyframes;
@@ -2213,6 +2421,8 @@ private:
 
     // DVL noise parameters
     double dvl_noise_x_{0.05}, dvl_noise_y_{0.05}, dvl_noise_z_{0.05};
+    bool   dvl_static_noise_{true};   // true → use yaml noise_x/y/z; false → use msg covariance
+    gtsam::noiseModel::Diagonal::shared_ptr latest_dvl_noise_;  // updated per DVL message
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

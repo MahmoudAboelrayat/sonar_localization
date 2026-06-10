@@ -52,10 +52,18 @@ def launch_setup(context, *args, **kwargs):
             remappings=[('odometry/filtered', 'odometry/ekf_local')]
         ),
         Node(
+                package='robot_localization',
+                executable='ekf_node',
+                name='ekf_global',
+                output='screen',
+                parameters=[ekf_config_path, {'use_sim_time': sim_time}]
+        ),
+        Node(
             package='robot_localization',
             executable='ekf_node',
-            name='ekf_global',
+            name='ekf_gps',
             output='screen',
+            remappings=[('odometry/filtered', 'odometry/ekf_gps')],
             parameters=[ekf_config_path, {'use_sim_time': sim_time}]
         ),
 

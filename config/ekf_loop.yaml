@@ -103,6 +103,36 @@
     # odom0_differential: true
     # PLUS THE ABSOLUTE DEPTH
 
+
+/**/ekf_gps:
+  ros__parameters:
+    frequency: 10.0
+    two_d_mode: true
+    publish_tf: false
+
+    map_frame: "icp_map"
+    odom_frame: "gps_odom"
+    base_link_frame: "base_link"
+    world_frame: "icp_map"
+
+    odom0: "odometry/gps"         
+    odom0_config: [true,  true,  false,
+                   false, false, true,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+    odom0_differential: false
+    odom0_relative:     false
+    odom0_rejection_threshold: 2.0
+
+    twist0: "/dvl/velocity"
+    twist0_config: [false, false, false,
+                    false, false, false,
+                    true,  true,  false,
+                    false, false, false,
+                    false, false, false]
+    twist0_rejection_threshold: 2.0
+
 /navsat_transform_node:
   ros__parameters:
     use_sim_time: true

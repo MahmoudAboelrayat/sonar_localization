@@ -16,6 +16,7 @@
       imu_sub: "/dvl/imu"
       dvl_sub: "/dvl/velocity"
       ahrs_sub: "/dvl/ahrs_imu"
+      mag_sub:  "nucleus_node/magnetometer_packets"
       depth_sub: "/depth_odom"
       vo_sub: "/odometry/visual"
 
@@ -98,6 +99,11 @@
       ndt_epsilon: 0.01
 
     gtsam:
+      vgicp_static_noise: true    # true = fixed noise; false = scale sigmas by fitness score
+      vgicp_noise_scale: 10.0      # sigma *= (1 + score * scale)  — used only when static=false
+      vgicp_skip_score: 0.0      # skip BetweenFactor entirely if score > this (0 = disabled)
+      vgicp_use_huber: false      # wrap scan factor in Huber robust kernel
+      vgicp_huber_k: 1.345        # Huber threshold — residuals beyond this are penalised linearly
       odom_noise_x: 0.01
       odom_noise_y: 0.01
       odom_noise_z: 0.1
@@ -114,12 +120,18 @@
 
     imu:
       use_imu: true            # set true to enable IMU preintegration
-      start_kf: 0           # keyframes to wait before activating ImuFactor (GICP warms up first)
-      accel_noise: 6.5e-2          # accelerometer white noise [m/s^2/sqrt(Hz)]
-      gyro_noise:  8.7e-2          # gyroscope white noise [rad/s/sqrt(Hz)]
-      accel_bias_noise: 1.35e-4  # accelerometer bias random walk (loosened for faster convergence)
-      gyro_bias_noise:  3.9e-5  # gyroscope bias random walk (loosened for faster convergence)
+      start_kf: 20           # keyframes to wait before activating ImuFactor (GICP warms up first)
+      # accel_noise: 6.5e-2          # accelerometer white noise [m/s^2/sqrt(Hz)]
+      # gyro_noise:  8.7e-2          # gyroscope white noise [rad/s/sqrt(Hz)]
+      # accel_bias_noise: 1.35e-4  # accelerometer bias random walk (loosened for faster convergence)
+      # gyro_bias_noise:  3.9e-5  # gyroscope bias random walk (loosened for faster convergence)
       gravity: 9.81
+
+      accel_noise: 8.5e-1          # accelerometer white noise [m/s^2/sqrt(Hz)]
+      gyro_noise:  5.0e-2         # gyroscope white noise [rad/s/sqrt(Hz)]
+      accel_bias_noise: 1.0e-2  # accelerometer bias random walk (loosened for faster convergence)
+      gyro_bias_noise:  1.0e-3  # gyroscope bias random walk (loosened for faster convergence)
+
      
       static_accel_bias_x:  -0.00  # m/s^2 — measured resting a_x
       static_accel_bias_y:  0.0   # m/s^2 — measured resting a_y (primary Y drift source)
@@ -129,15 +141,16 @@
       static_gyro_bias_z:   0.00 # rad/s — measured resting omega_z (primary rotation drift)
 
     ahrs:
-      use_ahrs: true           # set true to enable AHRS roll+pitch factor
-      noise_rp:  0.0061        # sigma [rad] for roll and pitch (~1°)
-      noise_yaw: 0.1           # sigma [rad] for yaw (~6°) — reserved for future use
 
+      use_ahrs: false            # set true to enable AHRS roll+pitch GTSAM factor
+      noise_rp:  0.0061         # sigma [rad] for roll and pitch (~1°)
+      noise_yaw: 0.1            # sigma [rad] for yaw (~6°)
+
+      use_ahrs_init_guess: false  # override initial_guess roll+pitch from AHRS before VGICP
+      ahrs_fuse_yaw: false        # also replace yaw from AHRS (only if mag-based absolute yaw)
       # Accelerometer gravity prior — active only when use_ahrs is false
-      # Averages IMU accel between keyframes to estimate gravity direction (ORB-SLAM3 style)
-      # and adds a Pose3AttitudeFactor to prevent gravity leaking onto horizontal axes.
-      use_accel_gravity:  false  # set true when AHRS is off and use_imu is true
-      accel_gravity_noise: 0.1   # sigma [rad] — looser than AHRS since accel is noisier
+      use_accel_gravity:  true
+      accel_gravity_noise: 0.01
 
     depth:
       use_depth: true          # set true to enable depth factor from depth_odom topic

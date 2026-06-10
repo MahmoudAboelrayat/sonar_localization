@@ -24,6 +24,7 @@ find_package(PCL 1.8 REQUIRED COMPONENTS common io registration filters segmenta
 find_package(Eigen3 REQUIRED)
 find_package(GTSAM REQUIRED)
 find_package(small_gicp REQUIRED)
+find_package(interfaces REQUIRED)
 
 # --- 3. Executable Targets ---
 
@@ -190,7 +191,7 @@ add_executable(localization_imu_pre src/localization_imu_pre.cpp)
 ament_target_dependencies(localization_imu_pre
   rclcpp sensor_msgs nav_msgs geometry_msgs
   visualization_msgs pcl_conversions pcl_ros
-  fast_gicp GTSAM tf2_ros
+  fast_gicp GTSAM tf2_ros interfaces
 )
 target_include_directories(localization_imu_pre PUBLIC
   ${GTSAM_INCLUDE_DIR}
