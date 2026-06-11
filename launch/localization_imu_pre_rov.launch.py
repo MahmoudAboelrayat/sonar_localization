@@ -190,19 +190,6 @@ def launch_setup(context, *args, **kwargs):
                 ('odometry/filtered',  'odometry/filtered'),
             ],
         ),
-
-        Node(
-            package='sonar_localization',
-            executable='odom_enu2ned',
-            name='odom_enu2ned',
-            output='screen',
-            parameters=[{
-                'input_topic':  '/odometry/gps',
-                'output_topic': '/odometry/gps_ned',
-                'output_frame': 'icp_map',
-                'use_sim_time': sim_time,
-            }],
-        ),
     ]
 
 

@@ -21,6 +21,7 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/radius_outlier_removal.h>
+#include <pcl/filters/passthrough.h>
 
 #include <fast_gicp/gicp/fast_vgicp.hpp>
 #include <pcl/registration/ndt.h>
@@ -45,6 +46,7 @@
 #include <gtsam/base/numericalDerivative.h>
 
 #include <sensor_msgs/msg/imu.hpp>
+#include <interfaces/msg/magnetometer.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <tf2_ros/transform_broadcaster.h>
@@ -168,7 +170,8 @@ struct Keyframe {
     Eigen::Matrix4f pose;
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud;
     int id;
-    float ekf_z{0.0f};   // EKF depth at keyframe time — never overwritten by GTSAM
+    float ekf_z{0.0f};
+    rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
 };
 
 class GicpOdomNode : public rclcpp::Node
@@ -211,7 +214,8 @@ public:
         use_ekf_       = this->declare_parameter<bool>("use_ekf", true);
         ekf_z_         = this->declare_parameter<bool>("ekf_z", false);
         loop_ekf_z_    = this->declare_parameter<bool>("loop_ekf_z", false);
-        ekf_max_age_   = this->declare_parameter<double>("ekf_max_age", 0.1);
+        ekf_max_age_    = this->declare_parameter<double>("ekf_max_age",    0.1);
+        sensor_max_age_ = this->declare_parameter<double>("sensor_max_age", 0.1);
 
         debug        = this->declare_parameter<bool>("debug",       false);
         publish_tf_  = this->declare_parameter<bool>("publish_tf",  false);
@@ -293,8 +297,9 @@ public:
 
         // --- Publishers ---
         odom_pub_       = this->create_publisher<nav_msgs::msg::Odometry>       (odom_pub_topic,    10);
-        global_map_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2> (map_pub_topic,      1);
-        full_map_pub_   = this->create_publisher<sensor_msgs::msg::PointCloud2> ("vgicp_full_map",   1);
+        global_map_pub_  = this->create_publisher<sensor_msgs::msg::PointCloud2> (map_pub_topic,        1);
+        full_map_pub_    = this->create_publisher<sensor_msgs::msg::PointCloud2> ("vgicp_full_map",     1);
+        filtered_pc_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2> ("filtered_pc", 1);
         path_pub_       = this->create_publisher<nav_msgs::msg::Path>           ("vgicp_path",      10);
         lc_marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
                         "vgicp/loop_closure_constraints", 1);
@@ -367,6 +372,12 @@ public:
         // setup intensity filter (optional)
         filter_intensity = this->declare_parameter<bool>("intensity_filter.filter_intensity", false);
         min_intensity = this->declare_parameter<double>("intensity_filter.min_intensity", 0.0);
+
+        // setup range filter — removes points beyond max_range from sensor origin
+        // Useful for stripping sonar far-range artifacts (the flat slab at maximum range).
+        filter_range_   = this->declare_parameter<bool>  ("range_filter.filter_range",  false);
+        min_range_      = this->declare_parameter<double>("range_filter.min_range",       0.0);
+        max_range_      = this->declare_parameter<double>("range_filter.max_range",      10.0);
 
         // odom noise sigmas [roll, pitch, yaw, x, y, z]
         odom_noise_roll_  = this->declare_parameter<double>("gtsam.odom_noise_roll",  0.1);
@@ -544,6 +555,25 @@ public:
             });
         if (use_ahrs_) {
             RCLCPP_INFO(get_logger(), "AHRS attitude factor enabled on %s", ahrs_topic.c_str());
+        }
+
+        // Magnetometer yaw — relative heading fused into initial_guess only (no GTSAM factor)
+        use_mag_yaw_     = this->declare_parameter<bool>  ("ahrs.use_mag_yaw",       false);
+        mag_declination_ = this->declare_parameter<double>("ahrs.mag_declination_deg", 0.0);
+        if (use_mag_yaw_) {
+            std::string mag_topic = this->declare_parameter<std::string>(
+                "topics.mag_sub", "nucleus_node/magnetometer_packets");
+            mag_sub_ = this->create_subscription<interfaces::msg::Magnetometer>(
+                mag_topic, 100,
+                [this](const interfaces::msg::Magnetometer::SharedPtr msg) {
+                    std::lock_guard<std::mutex> lk(mag_mutex_);
+                    latest_mag_x_ = msg->magnetometer_x;
+                    latest_mag_y_ = msg->magnetometer_y;
+                    latest_mag_z_ = msg->magnetometer_z;
+                    has_mag_ = true;
+                });
+            RCLCPP_INFO(get_logger(), "[MagYaw] enabled on %s  declination=%.1f°",
+                mag_topic.c_str(), mag_declination_);
         }
 
         if (use_depth_) {
@@ -771,11 +801,14 @@ private:
                         B(current_id-1), *preint_));
                     if (debug) {
                         gtsam::Vector3 dv = preint_->deltaVij();
+                        gtsam::Vector3 dp = preint_->deltaPij();
                         RCLCPP_INFO(get_logger(),
                             "[IMU factor] kf=%d  dt=%.3fs  "
+                            "deltaPij=[%.4f, %.4f, %.4f] m  "
                             "deltaVij=[%.4f, %.4f, %.4f] m/s  "
                             "prev_vel=[%.4f, %.4f, %.4f] m/s",
                             current_id, preint_->deltaTij(),
+                            dp.x(), dp.y(), dp.z(),
                             dv.x(), dv.y(), dv.z(),
                             prev_velocity_.x(), prev_velocity_.y(), prev_velocity_.z());
                     }
@@ -908,6 +941,17 @@ private:
                         X(current_id-1), V(current_id-1),
                         X(current_id),   V(current_id),
                         B(current_id-1), *preint_));
+                    if (debug) {
+                        gtsam::Vector3 dv = preint_->deltaVij();
+                        gtsam::Vector3 dp = preint_->deltaPij();
+                        RCLCPP_INFO(get_logger(),
+                            "[IMU factor] kf=%d  dt=%.3fs  "
+                            "deltaPij=[%.4f, %.4f, %.4f] m  "
+                            "deltaVij=[%.4f, %.4f, %.4f] m/s",
+                            current_id, preint_->deltaTij(),
+                            dp.x(), dp.y(), dp.z(),
+                            dv.x(), dv.y(), dv.z());
+                    }
                     used_imu_factor = true;
                 }
             }
@@ -1162,6 +1206,7 @@ private:
         kf.cloud = cloud;
         kf.id    = current_id;
         kf.ekf_z = ekf_z;
+        kf.stamp = rclcpp::Time(static_cast<uint64_t>(stamp_sec * 1e9), RCL_ROS_TIME);
         keyframes_.push_back(kf);
 
         // ── LIO-SAM correctPoses() equivalent ────────────────────────────────
@@ -1255,9 +1300,9 @@ private:
                 *history_cloud_world += transformed;
             }
         }
-        RCLCPP_INFO(get_logger(), "Loop candidate: kf %d -> %d", latest_id, closest_id);
-        
-
+        if(debug){
+            RCLCPP_INFO(get_logger(), "Loop candidate: kf %d -> %d", latest_id, closest_id);
+        }
         // ── 2. Downsample history submap ──────────────────────────────────────
         pcl::PointCloud<pcl::PointXYZ>::Ptr history_ds(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::VoxelGrid<pcl::PointXYZ> ds_filter;
@@ -1299,22 +1344,26 @@ private:
 
         const char* lc_matcher = lc_use_ndt_ ? "NDT" : "VGICP";
         if (!lc_converged) {
-            RCLCPP_WARN(get_logger(), "Loop closure %s did not converge.", lc_matcher);
+            if(debug){
+                RCLCPP_WARN(get_logger(), "Loop closure %s did not converge.", lc_matcher);
+            }
             return;
         }
         Eigen::Vector3f t_corr     = correction.block<3,1>(0,3);
         float correction_dist      = t_corr.norm();
         float correction_angle     = Eigen::AngleAxisf(
             Eigen::Matrix3f(correction.block<3,3>(0,0))).angle() * 180.0f / M_PI;
-
-        RCLCPP_INFO(get_logger(),
-            "LC %s: score=%.4f | correction t=%.2fm angle=%.1fdeg",
-            lc_matcher, score, correction_dist, correction_angle);
-
-
+        if(debug){
+            RCLCPP_INFO(get_logger(),
+                "LC %s: score=%.4f | correction t=%.2fm angle=%.1fdeg",
+                lc_matcher, score, correction_dist, correction_angle);
+        }
+            
         if (score > lc_fitness_score_) {
-            RCLCPP_INFO(get_logger(), "Loop closure refused: score %.4f > threshold %.4f",
-                        score, lc_fitness_score_);
+            if(debug){
+                RCLCPP_INFO(get_logger(), "Loop closure refused: score %.4f > threshold %.4f",
+                            score, lc_fitness_score_);
+            }
             return;
         }
         
@@ -1322,16 +1371,18 @@ private:
         // Reject if correction is unreasonably large — likely wrong minimum
         if (correction_dist > static_cast<float>(lc_max_correction_dist_) ||
             correction_angle > static_cast<float>(lc_max_correction_angle_)) {
-            RCLCPP_WARN(get_logger(),
-                "Loop closure refused: correction too large (t=%.2fm angle=%.1fdeg) "
-                "— likely wrong minimum",
-                correction_dist, correction_angle);
+                if(debug){
+                    RCLCPP_WARN(get_logger(),
+                        "Loop closure refused: correction too large (t=%.2fm angle=%.1fdeg) "
+                        "— likely wrong minimum",
+                        correction_dist, correction_angle);
+                }
             return;
         }
-
-        RCLCPP_WARN(get_logger(), "Loop closure accepted! [%s] Score: %.4f | t=%.2fm | angle=%.1fdeg",
-                    lc_matcher, score, correction_dist, correction_angle);
-
+        if(debug){
+            RCLCPP_WARN(get_logger(), "Loop closure accepted! [%s] Score: %.4f | t=%.2fm | angle=%.1fdeg",
+                        lc_matcher, score, correction_dist, correction_angle);
+        }
         // ── 4. Compute pose constraint — LIO-SAM style ────────────────────────
         // correctionLidarFrame * tWrong = tCorrect
         // poseFrom = tCorrect, poseTo = history pose
@@ -1434,7 +1485,7 @@ private:
         for (auto & kf : keyframes_) {
             geometry_msgs::msg::PoseStamped ps;
             ps.header.frame_id = odom_frame_;
-            ps.header.stamp    = path_msg.header.stamp;
+            ps.header.stamp    = kf.stamp;
 
             Eigen::Vector3f    t(kf.pose.block<3,1>(0,3));
             Eigen::Quaternionf q(kf.pose.block<3,3>(0,0));
@@ -1596,13 +1647,12 @@ private:
         // ΔDi_p̄ += ΔR̂_IiIk * R_ID * Di_v * Δt_dvl
         // We use the DVL ping interval as Δt (typically 0.2 s at 5 Hz).
         // For a more accurate integration, imuCallback accumulates dR between pings.
-        static rclcpp::Time last_dvl_time{0, 0, RCL_ROS_TIME};
         rclcpp::Time now = msg->header.stamp;
         double dt_dvl = 0.0;
-        if (last_dvl_time.nanoseconds() > 0) {
-            dt_dvl = (now - last_dvl_time).seconds();
+        if (dvl_last_time_ > 0.0) {
+            dt_dvl = now.seconds() - dvl_last_time_;
         }
-        last_dvl_time = now;
+        dvl_last_time_ = now.seconds();
 
         if (dt_dvl > 0.001 && dt_dvl < 1.0) {  // sanity: between 1ms and 1s
             Eigen::Vector3d v_dvl(vel.x(), vel.y(), vel.z());
@@ -1722,6 +1772,31 @@ private:
             }
         }
 
+        // Sensor sync check — skip scan only if IMU/DVL data is genuinely stale
+        // (positive age = sensor stopped publishing). Negative age means the sensor
+        // timestamp is ahead of the scan (e.g. sonar timestamps at ping start) — safe to proceed.
+        if (use_imu_ || use_dvl_) {
+            double scan_t = rclcpp::Time(msg->header.stamp).seconds();
+            if (use_imu_ && imu_last_time_ > 0.0) {
+                double imu_age = scan_t - imu_last_time_;
+                if (imu_age > sensor_max_age_) {
+                    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                        "[SyncCheck] IMU is %.3fs stale relative to scan (max %.3fs) — skipping scan",
+                        imu_age, sensor_max_age_);
+                    return;
+                }
+            }
+            if (use_dvl_ && dvl_last_time_ > 0.0) {
+                double dvl_age = scan_t - dvl_last_time_;
+                if (dvl_age > sensor_max_age_) {
+                    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                        "[SyncCheck] DVL is %.3fs stale relative to scan (max %.3fs) — skipping scan",
+                        dvl_age, sensor_max_age_);
+                    return;
+                }
+            }
+        }
+
         // 1. Convert and intensity-filter
         pcl::PointCloud<pcl::PointXYZ>::Ptr raw(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::fromROSMsg(*msg, *raw);
@@ -1735,11 +1810,27 @@ private:
         // } else {
         //     *intensity_filtered = *raw;
         // }
+        // 1b. Range filter — drop points farther than max_range from the sensor origin.
+        // Applied in sensor frame so the cutoff is always distance from the transducer,
+        // independent of how the sensor is tilted.
+        pcl::PointCloud<pcl::PointXYZ>::Ptr range_filtered(new pcl::PointCloud<pcl::PointXYZ>);
+        if (filter_range_) {
+            float min_r2 = static_cast<float>(min_range_ * min_range_);
+            float max_r2 = static_cast<float>(max_range_ * max_range_);
+            range_filtered->reserve(raw->size());
+            for (const auto & pt : *raw) {
+                float r2 = pt.x*pt.x + pt.y*pt.y + pt.z*pt.z;
+                if (r2 >= min_r2 && r2 <= max_r2)
+                    range_filtered->push_back(pt);
+            }
+        } else {
+            range_filtered = raw;
+        }
+
         // 2. Transform into base frame
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_base(new pcl::PointCloud<pcl::PointXYZ>);
         Eigen::Matrix4f base_transform = is_ned_ ? (ned_transform_ * base2sonar_) : base2sonar_;
-        // pcl::transformPointCloud(*intensity_filtered, *cloud_base, base_transform);
-        pcl::transformPointCloud(*raw, *cloud_base, base_transform);
+        pcl::transformPointCloud(*range_filtered, *cloud_base, base_transform);
 
 
         // 3. Radius outlier removal, then statistical outlier removal
@@ -1759,6 +1850,13 @@ private:
         }
 
         if (filtered->empty()) return;  // nothing to match against — avoids VGICP SIGFPE
+
+        {
+            sensor_msgs::msg::PointCloud2 fpc_msg;
+            pcl::toROSMsg(*filtered, fpc_msg);
+            fpc_msg.header = msg->header;
+            filtered_pc_pub_->publish(fpc_msg);
+        }
 
         // 4. Grab EKF snapshot
         Eigen::Matrix4f current_ekf_pose;
@@ -1781,6 +1879,20 @@ private:
                 global_pose_ = bootstrap_pose;
             }
             prev_ekf_pose_ = current_ekf_pose;
+
+            // Capture magnetometer heading origin so all subsequent yaw values are relative
+            if (!use_ekf_ && use_mag_yaw_ && !mag_yaw_origin_set_) {
+                std::lock_guard<std::mutex> lk(mag_mutex_);
+                if (has_mag_) {
+                    mag_yaw_origin_ = std::atan2(
+                        -static_cast<double>(latest_mag_y_),
+                         static_cast<double>(latest_mag_x_));
+                    mag_yaw_origin_set_ = true;
+                    RCLCPP_INFO(get_logger(), "[MagYaw] origin captured = %.2f°",
+                        mag_yaw_origin_ * 180.0 / M_PI);
+                }
+            }
+
             AddKeyFrame(bootstrap_pose, filtered, bootstrap_pose(2, 3),
                         rclcpp::Time(msg->header.stamp).seconds());
             return;
@@ -1873,6 +1985,62 @@ private:
             if (depth_ok) initial_guess(2, 3) = static_cast<float>(depth_snap - depth_origin_);
         }
 
+        // ── Magnetometer relative yaw override ───────────────────────────────
+        // Only yaw is replaced — roll and pitch from IMU preintegration are untouched.
+        // Applied as a world-Z rotation delta so the existing roll/pitch in the rotation
+        // matrix are mathematically preserved: R_new = Rz(Δyaw) * R_current.
+        // Only active when use_ekf_ is false.
+        if (!use_ekf_ && use_mag_yaw_ && has_mag_ && mag_yaw_origin_set_) {
+            float mx, my, mz;
+            {
+                std::lock_guard<std::mutex> lk(mag_mutex_);
+                mx = latest_mag_x_; my = latest_mag_y_; mz = latest_mag_z_;
+            }
+
+            // Tilt-compensate using roll/pitch from current initial_guess
+            gtsam::Rot3 ig_rot = matrix2Pose3(initial_guess).rotation();
+            double roll  = ig_rot.roll();
+            double pitch = ig_rot.pitch();
+            float mx_h = mx * std::cos(pitch) + mz * std::sin(pitch);
+            float my_h = mx * std::sin(roll) * std::sin(pitch)
+                       + my * std::cos(roll)
+                       - mz * std::sin(roll) * std::cos(pitch);
+
+            double mag_yaw_abs = std::atan2(-static_cast<double>(my_h),
+                                             static_cast<double>(mx_h))
+                               + mag_declination_ * M_PI / 180.0;
+
+            // Relative yaw (zeroed at bootstrap), wrapped to [-π, π]
+            double mag_yaw = mag_yaw_abs - mag_yaw_origin_;
+            while (mag_yaw >  M_PI) mag_yaw -= 2.0 * M_PI;
+            while (mag_yaw < -M_PI) mag_yaw += 2.0 * M_PI;
+
+            // Current yaw in initial_guess
+            double cur_yaw = std::atan2(
+                static_cast<double>(initial_guess(1, 0)),
+                static_cast<double>(initial_guess(0, 0)));
+
+            // Apply only the yaw difference as a pre-multiplied world-Z rotation
+            // This preserves roll and pitch exactly.
+            double d = mag_yaw - cur_yaw;
+            while (d >  M_PI) d -= 2.0 * M_PI;
+            while (d < -M_PI) d += 2.0 * M_PI;
+            float cd = static_cast<float>(std::cos(d));
+            float sd = static_cast<float>(std::sin(d));
+            Eigen::Matrix3f Rz;
+            Rz <<  cd, -sd, 0.0f,
+                   sd,  cd, 0.0f,
+                  0.0f, 0.0f, 1.0f;
+            initial_guess.block<3,3>(0,0) = Rz * initial_guess.block<3,3>(0,0);
+
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 500,
+                "[MagYaw] abs=%.2f°  rel=%.2f°  cur_yaw=%.2f°  delta=%.2f°",
+                mag_yaw_abs * 180.0 / M_PI,
+                mag_yaw     * 180.0 / M_PI,
+                cur_yaw     * 180.0 / M_PI,
+                d           * 180.0 / M_PI);
+        }
+
         // ── Override initial guess rotation with AHRS roll+pitch ─────────────
         // AHRS gives gravity-referenced roll and pitch — no drift, no bias.
         // Keep yaw from IMU preintegration unless ahrs_fuse_yaw_ is set (mag-based AHRS).
@@ -1892,31 +2060,31 @@ private:
         // }
 
         // ── Compare current initial guess vs what EKF delta would have given ──
-        if (!use_ekf_ && has_ekf_) {
-            Eigen::Matrix4f ekf_delta = prev_ekf_pose_.inverse() * current_ekf_pose;
-            Eigen::Matrix4f ekf_guess = current_global * ekf_delta;
+        // if (!use_ekf_ && has_ekf_) {
+        //     Eigen::Matrix4f ekf_delta = prev_ekf_pose_.inverse() * current_ekf_pose;
+        //     Eigen::Matrix4f ekf_guess = current_global * ekf_delta;
 
-            Eigen::Vector3f t_cur = initial_guess.block<3,1>(0,3);
-            Eigen::Vector3f t_ekf = ekf_guess.block<3,1>(0,3);
-            Eigen::Vector3f diff  = t_cur - t_ekf;
+        //     Eigen::Vector3f t_cur = initial_guess.block<3,1>(0,3);
+        //     Eigen::Vector3f t_ekf = ekf_guess.block<3,1>(0,3);
+        //     Eigen::Vector3f diff  = t_cur - t_ekf;
 
-            // Extract yaw from each rotation matrix (Z-Y-X Euler, yaw = atan2(R10, R00))
-            float yaw_cur = std::atan2(initial_guess(1,0), initial_guess(0,0)) * 180.f / M_PI;
-            float yaw_ekf = std::atan2(ekf_guess(1,0),    ekf_guess(0,0))     * 180.f / M_PI;
-            float yaw_diff = yaw_cur - yaw_ekf;
-            // Wrap to [-180, 180]
-            if (yaw_diff >  180.f) yaw_diff -= 360.f;
-            if (yaw_diff < -180.f) yaw_diff += 360.f;
+        //     // Extract yaw from each rotation matrix (Z-Y-X Euler, yaw = atan2(R10, R00))
+        //     float yaw_cur = std::atan2(initial_guess(1,0), initial_guess(0,0)) * 180.f / M_PI;
+        //     float yaw_ekf = std::atan2(ekf_guess(1,0),    ekf_guess(0,0))     * 180.f / M_PI;
+        //     float yaw_diff = yaw_cur - yaw_ekf;
+        //     // Wrap to [-180, 180]
+        //     if (yaw_diff >  180.f) yaw_diff -= 360.f;
+        //     if (yaw_diff < -180.f) yaw_diff += 360.f;
 
-            RCLCPP_INFO(get_logger(),
-                "[InitGuess cmp]  xyz_cur=[%.3f, %.3f, %.3f]  xyz_ekf=[%.3f, %.3f, %.3f]"
-                "  xyz_diff=[%.3f, %.3f, %.3f] m  |diff|=%.3f m"
-                "  yaw_cur=%.2f°  yaw_ekf=%.2f°  yaw_diff=%.2f°",
-                t_cur.x(), t_cur.y(), t_cur.z(),
-                t_ekf.x(), t_ekf.y(), t_ekf.z(),
-                diff.x(),  diff.y(),  diff.z(),  diff.norm(),
-                yaw_cur, yaw_ekf, yaw_diff);
-        }
+        //     RCLCPP_INFO(get_logger(),
+        //         "[InitGuess cmp]  xyz_cur=[%.3f, %.3f, %.3f]  xyz_ekf=[%.3f, %.3f, %.3f]"
+        //         "  xyz_diff=[%.3f, %.3f, %.3f] m  |diff|=%.3f m"
+        //         "  yaw_cur=%.2f°  yaw_ekf=%.2f°  yaw_diff=%.2f°",
+        //         t_cur.x(), t_cur.y(), t_cur.z(),
+        //         t_ekf.x(), t_ekf.y(), t_ekf.z(),
+        //         diff.x(),  diff.y(),  diff.z(),  diff.norm(),
+        //         yaw_cur, yaw_ekf, yaw_diff);
+        // }
 
         // 7. Snapshot local map
         pcl::PointCloud<pcl::PointXYZ>::Ptr map_snapshot;
@@ -2020,12 +2188,23 @@ private:
                 ++lost_frames_;
                 {
                     std::lock_guard<std::mutex> pose_lock(pose_mutex_);
-                    // Keep the rotation from the last GTSAM-accepted pose — only advance
-                    // translation. Propagating a wrong yaw into global_pose_ here causes
-                    // cascading VGICP failures on subsequent scans.
+                    if(use_ekf_){
+                    // On rejection, keep the IMU-predicted rotation from initial_guess.
+                    // initial_guess is computed before VGICP runs, so it carries no VGICP
+                    // corruption. Freezing to current_global.rotation would silently drop every
+                    // rejected frame's rotation, causing multi-frame error accumulation during
+                    // consecutive rejections (e.g. fast rotation → 5°/frame × 3 rejects = 15°).
                     Eigen::Matrix4f safe_guess = initial_guess;
                     safe_guess.block<3,3>(0,0) = current_global.block<3,3>(0,0);
                     global_pose_ = safe_guess;
+                    }else{
+                    // On rejection, keep the IMU-predicted rotation from initial_guess.
+                    // initial_guess is computed before VGICP runs, so it carries no VGICP
+                    // corruption. Freezing to current_global.rotation would silently drop every
+                    // rejected frame's rotation, causing multi-frame error accumulation during
+                    // consecutive rejections (e.g. fast rotation → 5°/frame × 3 rejects = 15°).
+                    Eigen::Matrix4f safe_guess = initial_guess;
+                    global_pose_ = safe_guess;}
                 }
                 if (scan_preint_) {
                     std::lock_guard<std::mutex> ilk(imu_mutex_);
@@ -2206,6 +2385,7 @@ private:
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr           odom_pub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr     global_map_pub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr     full_map_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr     filtered_pc_pub_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr               path_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr lc_marker_pub_;
     std::thread                                                     loop_closure_thread_;
@@ -2244,6 +2424,8 @@ private:
     std::atomic<int>     ekf_msg_count_{0};
     int                  min_ekf_msgs_{20};
     double               ekf_max_age_{0.5};
+    double               sensor_max_age_{0.1};
+    double               dvl_last_time_{0.0};
 
     Eigen::Matrix4f prev_ekf_pose_;  // only accessed from pointCloudCallback
 
@@ -2285,6 +2467,9 @@ private:
     bool filter_radius_outliers_;
     bool filter_intensity;
     double min_intensity;
+    bool   filter_range_{false};
+    double min_range_{0.0};
+    double max_range_{10.0};
     bool use_ekf_{true};
     bool ekf_z_{false};
     bool debug{false};
@@ -2380,6 +2565,16 @@ private:
     gtsam::noiseModel::Diagonal::shared_ptr  biasPriorNoise_;
     gtsam::noiseModel::Diagonal::shared_ptr  dvlNoise_;
     gtsam::noiseModel::Isotropic::shared_ptr ahrsNoise_;  // 2D — roll+pitch only
+
+    // ── Magnetometer yaw (initial_guess only) ─────────────────────────────────
+    bool   use_mag_yaw_{false};
+    double mag_declination_{0.0};
+    bool   has_mag_{false};
+    float  latest_mag_x_{0.0f}, latest_mag_y_{0.0f}, latest_mag_z_{0.0f};
+    double mag_yaw_origin_{0.0};
+    bool   mag_yaw_origin_set_{false};
+    std::mutex mag_mutex_;
+    rclcpp::Subscription<interfaces::msg::Magnetometer>::SharedPtr mag_sub_;
 
     // ── Depth ─────────────────────────────────────────────────────────────────
     bool   use_depth_{false};

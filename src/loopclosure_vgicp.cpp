@@ -46,7 +46,8 @@ struct Keyframe {
     Eigen::Matrix4f pose;
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud;
     int id;
-    float ekf_z{0.0f};   // EKF depth at keyframe time — never overwritten by GTSAM
+    float ekf_z{0.0f};
+    rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
 };
 
 class GicpOdomNode : public rclcpp::Node
@@ -101,6 +102,7 @@ public:
         // GICP sanity check thresholds
         gicp_max_correction_dist_  = this->declare_parameter<double>("tuning.gicp_max_correction_dist",  1.0);
         gicp_max_correction_angle_ = this->declare_parameter<double>("tuning.gicp_max_correction_angle", 15.0);
+        gicp_fitness_score_        = this->declare_parameter<double>("tuning.gicp_fitness_score",        0.0);  // 0 = disabled
 
         // Extrinsics: translation + RPY in degrees (sonar -> base)
         double b2s_t_x   = this->declare_parameter<double>("tf.base2sonar_x",      -0.545);
@@ -285,6 +287,7 @@ private:
     // ── Keyframe management ───────────────────────────────────────────────────
     void AddKeyFrame(const Eigen::Matrix4f & current_pose,
                      pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
+                     rclcpp::Time stamp,
                      float ekf_z = 0.0f)
     {
         // Check keyframe threshold — quick check without GTSAM lock
@@ -337,6 +340,7 @@ private:
         kf.cloud = cloud;
         kf.id    = current_id;
         kf.ekf_z = ekf_z;
+        kf.stamp = stamp;
         keyframes_.push_back(kf);
 
         // ── LIO-SAM correctPoses() equivalent ────────────────────────────────
@@ -410,8 +414,8 @@ private:
             }
 
             if (closest_id == -1) {
-                RCLCPP_DEBUG(get_logger(),
-                    "No loop candidate within %.1fm of kf %d", lc_search_radius_, latest_id);
+                // RCLCPP_DEBUG(get_logger(),
+                    // "No loop candidate within %.1fm of kf %d", lc_search_radius_, latest_id);
                 return;
             }
 
@@ -431,7 +435,7 @@ private:
             }
         }
 
-        RCLCPP_INFO(get_logger(), "Loop candidate: kf %d -> %d", latest_id, closest_id);
+        // RCLCPP_INFO(get_logger(), "Loop candidate: kf %d -> %d", latest_id, closest_id);
 
         // ── 2. Downsample history submap ──────────────────────────────────────
         pcl::PointCloud<pcl::PointXYZ>::Ptr history_ds(new pcl::PointCloud<pcl::PointXYZ>);
@@ -441,7 +445,7 @@ private:
         ds_filter.filter(*history_ds);
 
         if (history_ds->empty() || latest_cloud_world->empty()) {
-            RCLCPP_WARN(get_logger(), "Loop closure aborted: empty clouds.");
+            // RCLCPP_WARN(get_logger(), "Loop closure aborted: empty clouds.");
             return;
         }
 
@@ -469,7 +473,7 @@ private:
 
         const char* lc_matcher = lc_use_ndt_ ? "NDT" : "VGICP";
         if (!lc_converged) {
-            RCLCPP_WARN(get_logger(), "Loop closure %s did not converge.", lc_matcher);
+            // RCLCPP_WARN(get_logger(), "Loop closure %s did not converge.", lc_matcher);
             return;
         }
         Eigen::Vector3f t_corr     = correction.block<3,1>(0,3);
@@ -482,8 +486,8 @@ private:
             lc_matcher, score, correction_dist, correction_angle);
 
         if (score > lc_fitness_score_) {
-            RCLCPP_INFO(get_logger(), "Loop closure refused: score %.4f > threshold %.4f",
-                        score, lc_fitness_score_);
+            // RCLCPP_INFO(get_logger(), "Loop closure refused: score %.4f > threshold %.4f",
+            //             score, lc_fitness_score_);
             return;
         }
 
@@ -495,8 +499,8 @@ private:
         //     return;
         // }
 
-        RCLCPP_WARN(get_logger(), "Loop closure accepted! [%s] Score: %.4f | t=%.2fm | angle=%.1fdeg",
-                    lc_matcher, score, correction_dist, correction_angle);
+        // RCLCPP_WARN(get_logger(), "Loop closure accepted! [%s] Score: %.4f | t=%.2fm | angle=%.1fdeg",
+        //             lc_matcher, score, correction_dist, correction_angle);
 
         // ── 4. Compute pose constraint — LIO-SAM style ────────────────────────
         // correctionLidarFrame * tWrong = tCorrect
@@ -514,7 +518,7 @@ private:
 
             // Guard: SLAM restarted while VGICP was running
             if (slam_generation_.load() != generation_before_gicp) {
-                RCLCPP_WARN(get_logger(), "Loop closure aborted: SLAM restarted during VGICP.");
+                // RCLCPP_WARN(get_logger(), "Loop closure aborted: SLAM restarted during VGICP.");
                 return;
             }
 
@@ -522,7 +526,7 @@ private:
             if (keyframes_.empty() ||
                 latest_id  >= static_cast<int>(keyframes_.size()) ||
                 closest_id >= static_cast<int>(keyframes_.size())) {
-                RCLCPP_WARN(get_logger(), "Loop closure aborted: keyframe count changed.");
+                // RCLCPP_WARN(get_logger(), "Loop closure aborted: keyframe count changed.");
                 return;
             }
 
@@ -599,7 +603,7 @@ private:
         for (auto & kf : keyframes_) {
             geometry_msgs::msg::PoseStamped ps;
             ps.header.frame_id = odom_frame_;
-            ps.header.stamp    = path_msg.header.stamp;
+            ps.header.stamp    = kf.stamp;
 
             Eigen::Vector3f    t(kf.pose.block<3,1>(0,3));
             Eigen::Quaternionf q(kf.pose.block<3,3>(0,0));
@@ -725,7 +729,7 @@ private:
                 global_pose_ = current_ekf_pose;
             }
             prev_ekf_pose_ = current_ekf_pose;
-            AddKeyFrame(current_ekf_pose, filtered, current_ekf_pose(2, 3));
+            AddKeyFrame(current_ekf_pose, filtered, rclcpp::Time(msg->header.stamp), current_ekf_pose(2, 3));
             return;
         }
 
@@ -752,19 +756,23 @@ private:
         pcl::PointCloud<pcl::PointXYZ> aligned;
         vgicp_.align(aligned, initial_guess);
 
-        if (vgicp_.hasConverged()) {
-            Eigen::Matrix4f result = vgicp_.getFinalTransformation();
+        // hasConverged() must be called first — querying score/transform before it
+        // resets fast_gicp's internal state and causes it to return false.
+        bool converged = vgicp_.hasConverged();
 
-            Eigen::Matrix4f diff           = initial_guess.inverse() * result;
-            float correction_dist          = diff.block<3,1>(0,3).norm();
-            float correction_angle         = Eigen::AngleAxisf(
-                Eigen::Matrix3f(diff.block<3,3>(0,0))).angle() * 180.0f / M_PI;
+        Eigen::Matrix4f result        = vgicp_.getFinalTransformation();
+        double          gicp_score    = vgicp_.getFitnessScore();
+        Eigen::Matrix4f diff          = initial_guess.inverse() * result;
+        float correction_dist         = diff.block<3,1>(0,3).norm();
+        float correction_angle        = Eigen::AngleAxisf(
+            Eigen::Matrix3f(diff.block<3,3>(0,0))).angle() * 180.0f / M_PI;
 
-            RCLCPP_DEBUG(get_logger(),
-                "GICP | score: %.4f | correction: t=%.2fm angle=%.1fdeg | src: %zu | tgt: %zu",
-                vgicp_.getFitnessScore(), correction_dist, correction_angle,
-                filtered->size(), map_snapshot->size());
+        bool gicp_rejected = converged && (
+            (gicp_fitness_score_ > 0.0 && gicp_score > gicp_fitness_score_) ||
+            correction_dist  > static_cast<float>(gicp_max_correction_dist_) ||
+            correction_angle > static_cast<float>(gicp_max_correction_angle_));
 
+        if (converged && !gicp_rejected) {
             lost_frames_ = 0;
 
             {
@@ -773,9 +781,8 @@ private:
                 global_pose_   = result;
                 current_global = result;
             }
-            double score = vgicp_.getFitnessScore();
-            publishOdometry(msg->header, score, false);
-            AddKeyFrame(current_global, filtered, current_ekf_pose(2, 3));
+            publishOdometry(msg->header, gicp_score, false);
+            AddKeyFrame(current_global, filtered, rclcpp::Time(msg->header.stamp), current_ekf_pose(2, 3));
 
             if (map_pub_count_++ % 5 == 0) {
                 sensor_msgs::msg::PointCloud2 map_msg;
@@ -791,6 +798,16 @@ private:
             prev_ekf_pose_ = current_ekf_pose;
 
         } else {
+            if (gicp_rejected) {
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                    "GICP rejected — score=%.4f (max %.4f)  t=%.2fm (max %.2f)  angle=%.1fdeg (max %.1f)",
+                    gicp_score,       gicp_fitness_score_,
+                    correction_dist,  gicp_max_correction_dist_,
+                    correction_angle, gicp_max_correction_angle_);
+            } else {
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                    "VGICP did not converge (lost=%d)", lost_frames_);
+            }
             if (lost_frames_ < max_lost_frames) {
                 ++lost_frames_;
                 std::lock_guard<std::mutex> pose_lock(pose_mutex_);
@@ -986,8 +1003,9 @@ private:
     bool   lc_use_ndt_{false};
 
     // GICP sanity check thresholds
-    double gicp_max_correction_dist_{1.0};   // meters
-    double gicp_max_correction_angle_{15.0}; // degrees
+    double gicp_max_correction_dist_{1.0};
+    double gicp_max_correction_angle_{15.0};
+    double gicp_fitness_score_{0.0};  // 0 = disabled
 
     int lost_frames_{0};
     int max_lost_frames{50};

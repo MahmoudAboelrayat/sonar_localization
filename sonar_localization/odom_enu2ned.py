@@ -20,8 +20,8 @@ from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from nav_msgs.msg import Odometry
 
 _R = np.array([
-    [0.0,  1.0,  0.0],
     [1.0,  0.0,  0.0],
+    [0.0,  -1.0,  0.0],
     [0.0,  0.0, -1.0],
 ], dtype=np.float64)
 

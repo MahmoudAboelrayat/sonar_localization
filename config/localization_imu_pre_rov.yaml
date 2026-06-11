@@ -4,9 +4,10 @@
     is_ned: false
     ekf_z: false
     loop_ekf_z: false
-    use_ekf:  true
+    use_ekf:  false
     publish_tf: false
     ekf_max_age: 0.1
+    sensor_max_age: 0.5          
 
     topics:
       odom_pub: "vgicp_odom"
@@ -29,12 +30,12 @@
     tuning:
       map_res: 0.1
       vgicp_threads: 6
-      vgicp_epsilon: 1e-4
-      vgicp_max_dist: 1.5
-      vgicp_max_iter: 100
+      vgicp_epsilon: 1e-3
+      vgicp_max_dist: 0.8
+      vgicp_max_iter: 200
       vgicp_resolution: 0.3
       max_lost_frames: 40
-      gicp_fitness_score:         2.0    # reject scan if score exceeds this
+      gicp_fitness_score:         0.0    # reject scan if score exceeds this
       gicp_max_correction_dist:   2.0    # reject if correction > 1m from initial guess
       gicp_max_correction_angle:  30.0   # reject if correction > 15deg from initial guess
 
@@ -51,6 +52,11 @@
     intensity_filter:
       filter_intensity: false
       min_intensity: 0.005
+
+    range_filter:
+      filter_range: true        # set true to strip near/far-range sonar artifacts
+      min_range: 0.5             # [m] — points closer than this are dropped (near-field noise)
+      max_range: 10.0            # [m] — points beyond this from sensor origin are dropped
 
     tf:
       base2sonar_x: 0.163
@@ -86,7 +92,7 @@
       use_lc: true
       search_radius: 15.0
       fitness_score: 0.1
-      history_gap: 40
+      history_gap: 30
       submap_size: 30
       vgicp_epsilon: 1e-4
       vgicp_max_dist: 0.8
@@ -128,7 +134,7 @@
       gravity: 9.81
 
       accel_noise: 8.5e-1          # accelerometer white noise [m/s^2/sqrt(Hz)]
-      gyro_noise:  5.0e-2         # gyroscope white noise [rad/s/sqrt(Hz)]
+      gyro_noise:  5.0e-3         # gyroscope white noise [rad/s/sqrt(Hz)]
       accel_bias_noise: 1.0e-2  # accelerometer bias random walk (loosened for faster convergence)
       gyro_bias_noise:  1.0e-3  # gyroscope bias random walk (loosened for faster convergence)
 
@@ -151,6 +157,9 @@
       # Accelerometer gravity prior — active only when use_ahrs is false
       use_accel_gravity:  true
       accel_gravity_noise: 0.01
+      # Magnetometer relative yaw — tilt-compensated, zeroed at bootstrap
+      use_mag_yaw: false          # fuse mag heading into initial_guess yaw (no GTSAM factor)
+      mag_declination_deg: 0.0    # local magnetic declination [degrees]
 
     depth:
       use_depth: true          # set true to enable depth factor from depth_odom topic
@@ -166,7 +175,7 @@
       noise_z: 0.5
       trans_noise_x: 0.001        # [m] DVL translation noise x
       trans_noise_y: 0.001        # [m] DVL translation noise y
-      trans_noise_z: 0.1        # [m] DVL translation noise z
+      trans_noise_z: 0.1          # [m] DVL translation noise z
 
 
     vo:

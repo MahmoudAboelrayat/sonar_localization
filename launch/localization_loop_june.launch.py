@@ -99,6 +99,14 @@ def launch_setup(context, *args, **kwargs):
             arguments=['0.0', '-0.106', '0.265', '0.0', '0.0', '0.0', 'base_link', 'dvl_link'],
             output='screen',
         ),
+                Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_gss',
+            arguments=['0.0', '-0.106', '-0.2', '0.0', '0.0', '3.1415', 'base_link', 'gnss'],
+            output='screen',
+        ),
+
 
 
 
@@ -211,17 +219,41 @@ def launch_setup(context, *args, **kwargs):
 
 
         ### Navsat #####
+
+        Node(
+            package='robot_localization',
+            executable='navsat_transform_node',
+            name='navsat_transform_node',
+            output='screen',
+            parameters=[ekf_config_path, {'use_sim_time': sim_time}],
+            remappings=[
+                ('imu',           '/dvl/imu'),
+                ('gps/fix',            'fix'),
+                ('odometry/filtered',  'odometry/filtered'),
+            ],
+        ),
+
+
         # Node(
-        #     package='robot_localization',
-        #     executable='navsat_transform_node',
-        #     name='navsat_transform',
+        #     package='sonar_localization',
+        #     executable='odom_enu2ned',
+        #     name='odom_enu2ned',
         #     output='screen',
-        #     parameters=[{'use_sim_time': True}, ekf_config_path],
-        #     remappings=[
-        #         ('/gps/fix', '/fix'),     # Map to your SBG topic
-        #         ('imu', '/mavros/imu/data'),            # Map to your IMU topic
-        #         ('odometry/filtered', '/odometry/filtered')
-        #     ]
+        #     parameters=[{
+        #         'input_topic':  '/odometry/gps',
+        #         'output_topic': '/odometry/gps_ned',
+        #         'output_frame': 'icp_map',
+        #         'use_sim_time': sim_time,
+        #     }],
+        # ),
+
+        #  Node(
+        #     package='robot_localization',
+        #     executable='ekf_node',
+        #     name='ekf_gps',
+        #     output='screen',
+        #     remappings=[('odometry/filtered', 'odometry/ekf_gps')],
+        #     parameters=[ekf_config_path, {'use_sim_time': sim_time}]
         # ),
         # Node(
         #     package='sonar_localization',
