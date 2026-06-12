@@ -4,7 +4,7 @@
     is_ned: false
     ekf_z: false
     loop_ekf_z: false
-    use_ekf:  false
+    use_ekf:  true
     publish_tf: false
     ekf_max_age: 0.1
     sensor_max_age: 0.5          
@@ -42,7 +42,7 @@
     radius_outlier_removal:
       filter_radius_outliers: true
       radius_search: 0.2
-      min_neighbors_in_radius: 30
+      min_neighbors_in_radius: 10
 
     outlier_removal:
       filter_outliers: true
@@ -56,7 +56,7 @@
     range_filter:
       filter_range: true        # set true to strip near/far-range sonar artifacts
       min_range: 0.5             # [m] — points closer than this are dropped (near-field noise)
-      max_range: 10.0            # [m] — points beyond this from sensor origin are dropped
+      max_range: 12.0            # [m] — points beyond this from sensor origin are dropped
 
     tf:
       base2sonar_x: 0.163
@@ -65,7 +65,7 @@
       base2sonar_roll: 0.0
       base2sonar_pitch: -20.0   # (22.5) degrees (- down / + up)
       base2sonar_yaw: 0.0
-
+ 
       # IMU mounting — rotation from IMU frame to base_link
       imu2base_roll:  0.0      # degrees
       imu2base_pitch: 0.0
@@ -134,7 +134,7 @@
       gravity: 9.81
 
       accel_noise: 8.5e-1          # accelerometer white noise [m/s^2/sqrt(Hz)]
-      gyro_noise:  5.0e-3         # gyroscope white noise [rad/s/sqrt(Hz)]
+      gyro_noise:  5.0e-2         # gyroscope white noise [rad/s/sqrt(Hz)]
       accel_bias_noise: 1.0e-2  # accelerometer bias random walk (loosened for faster convergence)
       gyro_bias_noise:  1.0e-3  # gyroscope bias random walk (loosened for faster convergence)
 

@@ -203,7 +203,7 @@ public:
         // setup radius outlier removal (optional)
         filter_radius_outliers_ = this->declare_parameter<bool>("radius_outlier_removal.filter_radius_outliers", false);
         double ror_radius = this->declare_parameter<double>("radius_outlier_removal.search_radius", 0.5);
-        int ror_min_neighbors = this->declare_parameter<int>("radius_outlier_removal.min_neighbors", 5);
+        int ror_min_neighbors = this->declare_parameter<int>("radius_outlier_removal.min_neighbors_in_radius", 5);
         ror_.setRadiusSearch(ror_radius);
         ror_.setMinNeighborsInRadius(ror_min_neighbors);
 

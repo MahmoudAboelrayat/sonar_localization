@@ -314,7 +314,7 @@ public:
         ekf_sub_opt.callback_group = ekf_cb_group;
 
         pc_sub_  = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-            pc_sub_topic, 10,
+            pc_sub_topic, 1,
             std::bind(&GicpOdomNode::pointCloudCallback, this, std::placeholders::_1),
             pc_sub_opt);
 
@@ -365,7 +365,7 @@ public:
         // setup radius outlier removal (optional)
         filter_radius_outliers_ = this->declare_parameter<bool>("radius_outlier_removal.filter_radius_outliers", false);
         double ror_radius = this->declare_parameter<double>("radius_outlier_removal.search_radius", 0.5);
-        int ror_min_neighbors = this->declare_parameter<int>("radius_outlier_removal.min_neighbors", 5);
+        int ror_min_neighbors = this->declare_parameter<int>("radius_outlier_removal.min_neighbors_in_radius", 5);
         ror_.setRadiusSearch(ror_radius);
         ror_.setMinNeighborsInRadius(ror_min_neighbors);
 
@@ -1938,8 +1938,6 @@ private:
         else if (use_imu_ && scan_preint_) {
             // Case 2: IMU only (no DVL)
             //   Full preintegration: gravity + double-integrated accel + gyro rotation
-            //   p_guess = p_last + v_last*dt + ΔP_imu
-            //   R_guess = R_last * ΔR_imu
             gtsam::NavState prop;
             {
                 std::lock_guard<std::mutex> ilk(imu_mutex_);
