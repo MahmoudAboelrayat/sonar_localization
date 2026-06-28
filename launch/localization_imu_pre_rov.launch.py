@@ -140,6 +140,7 @@ def launch_setup(context, *args, **kwargs):
                 'init_yaw':     init_yaw,
                 'init_roll':    0.0,
                 'init_pitch':   0.0,
+                'rviz_is_ned':  True,
             }]
         ),
 
@@ -190,6 +191,18 @@ def launch_setup(context, *args, **kwargs):
                 ('odometry/filtered',  'odometry/filtered'),
             ],
         ),
+        #    Node(
+        #     package='sonar_localization',
+        #     executable='odom_enu2ned',
+        #     name='odom_enu2ned',
+        #     output='screen',
+        #     parameters=[{
+        #         'input_topic':  '/odometry/gps',
+        #         'output_topic': '/odometry/gps_ned',
+        #         'output_frame': 'icp_map',
+        #         'use_sim_time': sim_time,
+        #     }],
+        # ),
     ]
 
 

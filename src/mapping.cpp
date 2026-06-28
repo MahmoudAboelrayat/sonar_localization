@@ -15,6 +15,7 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/radius_outlier_removal.h>
+#include <pcl/io/pcd_io.h>
 
 #include <Eigen/Geometry>
 
@@ -48,12 +49,14 @@ public:
         max_pts_per_voxel_     = this->declare_parameter<int>("max_pts_per_voxel", 20);
         max_range_             = static_cast<float>(this->declare_parameter<double>("max_range", -1.0));
         max_z_                 = static_cast<float>(this->declare_parameter<double>("max_z", -1.0));
+        save_on_shutdown_      = this->declare_parameter<bool>  ("save_on_shutdown", true);
+        save_path_             = this->declare_parameter<std::string>("save_path", "/tmp/prior_map.pcd");
 
-        use_sor_        = this->declare_parameter<bool>  ("use_sor",          false);
+        use_sor_        = this->declare_parameter<bool>  ("use_sor",          true);
         sor_k_          = this->declare_parameter<int>   ("sor_k",            10);
         sor_std_thresh_ = static_cast<float>(this->declare_parameter<double>("sor_std_thresh", 1.0));
 
-        use_ror_           = this->declare_parameter<bool>  ("use_ror",          false);
+        use_ror_           = this->declare_parameter<bool>  ("use_ror",          true);
         ror_min_neighbors_ = this->declare_parameter<int>   ("ror_min_neighbors", 5);
         ror_radius_        = static_cast<float>(this->declare_parameter<double>("ror_radius", 0.5));
 
@@ -94,6 +97,20 @@ public:
             pc_topic.c_str(), odom_topic.c_str(), map_topic.c_str());
         RCLCPP_INFO(get_logger(), "Waiting for %d odom msgs before mapping. Max %d pts/voxel.",
             odom_warmup_, max_pts_per_voxel_);
+    }
+
+    ~MapNode()
+    {
+        if (save_on_shutdown_ && !global_map_->empty()) {
+            global_map_->width    = global_map_->size();
+            global_map_->height   = 1;
+            global_map_->is_dense = false;
+            if (pcl::io::savePCDFileBinary(save_path_, *global_map_) == 0)
+                RCLCPP_INFO(get_logger(), "Map saved → %s  (%zu pts)",
+                            save_path_.c_str(), global_map_->size());
+            else
+                RCLCPP_ERROR(get_logger(), "Failed to save map to %s", save_path_.c_str());
+        }
     }
 
 private:
@@ -248,6 +265,8 @@ private:
     bool        use_ror_{false};
     int         ror_min_neighbors_{5};
     float       ror_radius_{0.5f};
+    bool        save_on_shutdown_{true};
+    std::string save_path_{"/tmp/prior_map.pcd"};
 };
 
 int main(int argc, char **argv)

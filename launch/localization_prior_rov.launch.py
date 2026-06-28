@@ -28,12 +28,13 @@ def launch_setup(context, *args, **kwargs):
     # Helper: prefix frame name with namespace when one is set
     def f(frame): return f'{ns}/{frame}' if ns else frame
 
-    init_x     = float(LaunchConfiguration('init_x').perform(context))
-    init_y     = float(LaunchConfiguration('init_y').perform(context))
-    init_z     = float(LaunchConfiguration('init_z').perform(context))
-    init_yaw   = float(LaunchConfiguration('init_yaw').perform(context))
-    init_roll  = float(LaunchConfiguration('init_roll').perform(context))
-    init_pitch = float(LaunchConfiguration('init_pitch').perform(context))
+    init_x       = float(LaunchConfiguration('init_x').perform(context))
+    init_y       = float(LaunchConfiguration('init_y').perform(context))
+    init_z       = float(LaunchConfiguration('init_z').perform(context))
+    init_yaw     = float(LaunchConfiguration('init_yaw').perform(context))
+    init_roll    = float(LaunchConfiguration('init_roll').perform(context))
+    init_pitch   = float(LaunchConfiguration('init_pitch').perform(context))
+    min_keyframes = int(LaunchConfiguration('min_keyframes').perform(context))
 
     return [
 
@@ -109,15 +110,18 @@ def launch_setup(context, *args, **kwargs):
             namespace=ns,
             output='screen',
             parameters=[{
+                'rviz_is_ned':   False,
                 'parent_frame': '/world',
                 'child_frame':  '/icp_map',
                 'use_sim_time': sim_time,
                 'init_x':       init_x,
                 'init_y':       init_y,
                 'init_z':       init_z,
-                'init_yaw':     init_yaw,
-                'init_roll':    init_roll,
-                'init_pitch':   init_pitch,
+                'init_yaw':       init_yaw,
+                'init_roll':      init_roll,
+                'init_pitch':     init_pitch,
+                'lock_roll_pitch': True,
+                'lock_z':          True,
             }]
         ),
 
@@ -161,15 +165,16 @@ def launch_setup(context, *args, **kwargs):
                 'initialpose_topic': '/initialpose',
                 'child_frame':       '/icp_map',
                 'period':            3.0,
+                'min_keyframes':     min_keyframes,
                 'voxel_size':        0.3,
                 'fitness_threshold': 0.8,
                 'max_corr_dist':     3.0,
                 'is_ned':            True,
                 'use_ndt':           True,
-                'ndt_resolution':    1.0,
-                'ndt_step_size':     0.5,
+                'ndt_resolution':    1.5,
+                'ndt_step_size':     1.0,
                 'ndt_epsilon':       0.01,
-                'ndt_max_iter':      50,
+                'ndt_max_iter':      100,
                 'vgicp_threads':     4,
                 'vgicp_max_iter':    200,
                 'vgicp_resolution':  0.3,
@@ -226,14 +231,15 @@ def generate_launch_description():
                               description='tight = localization_imu_pre | loose = loopclosure_vgicp'),
         DeclareLaunchArgument('dvl_type',  default_value='nucleus',
                               description='dvl model: nucleus / waterlinked / sim'),
-        DeclareLaunchArgument('map_file',   default_value='/home/mahmoud/thesis_ws/src/sonar_localization/maps/usv_map.pcd',
+        DeclareLaunchArgument('map_file',   default_value='/home/mahmoud/thesis_ws/src/sonar_localization/maps/prior_map.pcd',
                               description='absolute path to the prior map .pcd file'),
         DeclareLaunchArgument('init_x',     default_value='2.17055',  description='initial TF x [m]'),
         DeclareLaunchArgument('init_y',     default_value='0.359599', description='initial TF y [m]'),
         DeclareLaunchArgument('init_z',     default_value='0.0',      description='initial TF z [m]'),
-        DeclareLaunchArgument('init_yaw',   default_value='0.0',      description='initial TF yaw [rad]'),
-        DeclareLaunchArgument('init_roll',  default_value='0.0',      description='initial TF roll [rad]'),
-        DeclareLaunchArgument('init_pitch', default_value='0.0',      description='initial TF pitch [rad]'),
+        DeclareLaunchArgument('init_yaw',   default_value='0.0',      description='initial TF yaw [deg]'),
+        DeclareLaunchArgument('init_roll',     default_value='0.0', description='initial TF roll [rad]'),
+        DeclareLaunchArgument('init_pitch',    default_value='0.0', description='initial TF pitch [rad]'),
+        DeclareLaunchArgument('min_keyframes', default_value='2',   description='keyframes to collect before map matching starts'),
         DeclareLaunchArgument('rviz',      default_value='true',
                               description='open rviz window'),
         DeclareLaunchArgument('sim_time',  default_value='true',

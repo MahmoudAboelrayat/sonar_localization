@@ -16,7 +16,7 @@ def generate_launch_description():
     # init_y = -0.042
     # init_z = -0.000
 
-    angle = 90.0 * 3.14159265359/180.0
+    angle = -50.0 * 3.14159265359/180.0
     init_x = 0.0
     init_y = 0.0
     init_z =  -0.03  
@@ -36,7 +36,7 @@ def generate_launch_description():
             executable='imu_bridge',
             name='imu_bridge',
             output='screen',
-            parameters=[{'frame_id':'BlueROV2_Heavy/base_link','imu_topic':'/BlueROV2_Heavy/mavros/imu/data_raw'}],),
+            parameters=[{'frame_id':'BlueROV2_Heavy/base_link_ned','imu_topic':'/BlueROV2_Heavy/mavros/imu/data_raw','add_noise': True,'output_topic':'/imu/data'}],),
             
         #### EKF Nodes ####
         Node(
@@ -65,6 +65,15 @@ def generate_launch_description():
             arguments=[str(init_x), str(init_y), str(init_z), str(angle), '0', '0', 'BlueROV2_Heavy/odom', 'odom'],
             parameters=[{'use_sim_time': True}]
         ),
+
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='tf_base_ned',
+            arguments=['0.0', '0.0', '0.0', '0.0', '0', '3.14159', 'BlueROV2_Heavy/base_link', 'BlueROV2_Heavy/base_link_ned'],
+            parameters=[{'use_sim_time': True}]
+        ),
+
 
 
         # vgicp odometry

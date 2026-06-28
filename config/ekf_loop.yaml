@@ -149,7 +149,7 @@
     frequency: 10.0
     delay: 0.0
     magnetic_declination_radians: 0.13 # Change this based on your city (e.g., 0.21 for NYC)
-    yaw_offset: 1.57      # IMU reads 0 at North? If not, adjust (1.57 is 90 deg)
+    yaw_offset: 0.7     # IMU reads 0 at North? If not, adjust (1.57 is 90 deg)
     zero_altitude: true              # Use if you only care about XY movement
     publish_filtered_gps: true       # Useful for debugging on a map
     broadcast_cartesian_transform: false

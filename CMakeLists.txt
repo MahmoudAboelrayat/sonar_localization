@@ -147,6 +147,19 @@ target_link_libraries(mapping
 )
 
 
+# Node: dense_mapping
+add_executable(dense_mapping src/dense_mapping.cpp)
+ament_target_dependencies(dense_mapping
+  rclcpp sensor_msgs nav_msgs geometry_msgs visualization_msgs pcl_conversions
+)
+target_include_directories(dense_mapping PUBLIC
+  ${PCL_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+)
+target_link_libraries(dense_mapping
+  ${PCL_LIBRARIES}
+)
+
 # Node: prior_map_publisher
 add_executable(prior_map_publisher src/prior_map_publisher.cpp)
 ament_target_dependencies(prior_map_publisher
@@ -194,6 +207,7 @@ ament_target_dependencies(localization_imu_pre
   fast_gicp GTSAM tf2_ros interfaces
 )
 target_include_directories(localization_imu_pre PUBLIC
+  include
   ${GTSAM_INCLUDE_DIR}
   ${PCL_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIRS}
@@ -206,6 +220,7 @@ target_link_libraries(localization_imu_pre
 # Install C++ Executables
 install(TARGETS
   map_matcher
+  dense_mapping
   localization_prior
   localization_imu_pre
   loopclosure_vgicp

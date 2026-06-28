@@ -83,15 +83,15 @@ class OdomENU2NED(Node):
         out.pose.pose.position.z = pn[2]
 
         # Orientation
-        q = np.array([msg.pose.pose.orientation.w,
-                      msg.pose.pose.orientation.x,
-                      msg.pose.pose.orientation.y,
-                      msg.pose.pose.orientation.z])
-        qn = _qmul(_Q, q)
-        out.pose.pose.orientation.w = qn[0]
-        out.pose.pose.orientation.x = qn[1]
-        out.pose.pose.orientation.y = qn[2]
-        out.pose.pose.orientation.z = qn[3]
+        # q = np.array([msg.pose.pose.orientation.w,
+        #               msg.pose.pose.orientation.x,
+        #               msg.pose.pose.orientation.y,
+        #               msg.pose.pose.orientation.z])
+        # qn = _qmul(_Q, q)
+        out.pose.pose.orientation.w = msg.pose.pose.orientation.w
+        out.pose.pose.orientation.x = msg.pose.pose.orientation.x
+        out.pose.pose.orientation.y = msg.pose.pose.orientation.y
+        out.pose.pose.orientation.z = msg.pose.pose.orientation.z
 
         # Pose covariance  (R6 @ C @ R6ᵀ)
         C = np.array(msg.pose.covariance).reshape(6, 6)

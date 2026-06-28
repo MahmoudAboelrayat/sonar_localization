@@ -12,10 +12,10 @@ odom_vgicp:
       map_pub: "vgicp_sub_map"
    
     tuning:
-      map_res: 0.2
+      map_res: 0.1
       vgicp_threads: 6
       vgicp_epsilon: 1e-4
-      vgicp_max_dist: 1.5
+      vgicp_max_dist: 0.8
       vgicp_max_iter: 100
       vgicp_resolution: 0.3
       max_lost_frames: 40
@@ -51,7 +51,7 @@ odom_vgicp:
     keyframe:
       submap_size:   30      
       dist_thresh:   0.5
-      angle_thresh:  8.0    # degrees 
+      angle_thresh:  5.0    # degrees 
       min_dt: 0.3
 
 

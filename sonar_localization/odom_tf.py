@@ -21,6 +21,8 @@ class OdomTfNode(Node):
         self.declare_parameter('init_yaw', 0.0)
         self.declare_parameter('init_roll', 0.0)
         self.declare_parameter('init_pitch', 0.0)
+        self.declare_parameter('lock_roll_pitch', True)
+        self.declare_parameter('lock_z', True)
         self.parent_frame = self.get_parameter('parent_frame').get_parameter_value().string_value
         self.child_frame  = self.get_parameter('child_frame').get_parameter_value().string_value
 
@@ -28,8 +30,10 @@ class OdomTfNode(Node):
         self.init_y = self.get_parameter('init_y').get_parameter_value().double_value
         self.init_z = self.get_parameter('init_z').get_parameter_value().double_value
         self.init_yaw = self.get_parameter('init_yaw').get_parameter_value().double_value
-        self.init_roll = self.get_parameter('init_roll').get_parameter_value().double_value
-        self.init_pitch = self.get_parameter('init_pitch').get_parameter_value().double_value
+        self.init_roll       = self.get_parameter('init_roll').get_parameter_value().double_value
+        self.init_pitch      = self.get_parameter('init_pitch').get_parameter_value().double_value
+        self.lock_roll_pitch = self.get_parameter('lock_roll_pitch').get_parameter_value().bool_value
+        self.lock_z          = self.get_parameter('lock_z').get_parameter_value().bool_value
 
         q = self.quaternion_from_euler(self.init_roll, self.init_pitch, self.init_yaw)
         self._br = StaticTransformBroadcaster(self)
@@ -92,10 +96,13 @@ class OdomTfNode(Node):
         p = msg.pose.pose.position
         q = msg.pose.pose.orientation
         roll, pitch, yaw = self.euler_from_quaternion([q.x, q.y, q.z, q.w])
-        q_fixed = self.quaternion_from_euler(self.init_roll, self.init_pitch, yaw)
-        self._publish_tf(p.x, p.y, self.init_z, q_fixed[0], q_fixed[1], q_fixed[2], q_fixed[3])
+        r_out = self.init_roll  if self.lock_roll_pitch else roll
+        p_out = self.init_pitch if self.lock_roll_pitch else pitch
+        z_out = self.init_z     if self.lock_z          else p.z
+        q_fixed = self.quaternion_from_euler(r_out, p_out, yaw)
+        self._publish_tf(p.x, p.y, z_out, q_fixed[0], q_fixed[1], q_fixed[2], q_fixed[3])
         self.get_logger().info(
-            f"Initial pose set: [{p.x:.3f}, {p.y:.3f}, {self.init_z:.3f}], [{roll:.3f}, {pitch:.3f}, {yaw:.3f}]")
+            f"Initial pose set: [{p.x:.3f}, {p.y:.3f}, {z_out:.3f}], [{roll:.3f}, {pitch:.3f}, {yaw:.3f}]")
 
     def _publish_tf(self, tx, ty, tz, qx, qy, qz, qw=1.0):
         t = TransformStamped()

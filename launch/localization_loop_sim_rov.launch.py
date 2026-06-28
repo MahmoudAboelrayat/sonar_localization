@@ -13,15 +13,15 @@ def generate_launch_description():
     # init_y = 1.005
     # init_z = -0.000
 
-    angle = 53.081 * 3.14159265359/180.0
+    angle = 90.0 * 3.14159265359/180.0
     # init_x = 0.125
     # init_y = -0.042
     # init_z = -0.000
 
     # 0.166, 0.013, 0.001
-    init_x = 0.166
-    init_y = 0.013
-    init_z = 0.001
+    init_x = 0.0
+    init_y = 0.0
+    init_z = 0.0
     return LaunchDescription([
 
         #### Topics Bridges ####

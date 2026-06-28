@@ -123,6 +123,8 @@
       lc_noise_roll: 0.01
       lc_noise_pitch: 0.01
       lc_noise_yaw: 0.015
+      lc_use_huber: true          # wrap loop closure factor in Huber robust kernel
+      lc_huber_k: 1.0             # Huber threshold for loop closure
 
     imu:
       use_imu: true            # set true to enable IMU preintegration
@@ -147,7 +149,6 @@
       static_gyro_bias_z:   0.00 # rad/s — measured resting omega_z (primary rotation drift)
 
     ahrs:
-
       use_ahrs: false            # set true to enable AHRS roll+pitch GTSAM factor
       noise_rp:  0.0061         # sigma [rad] for roll and pitch (~1°)
       noise_yaw: 0.1            # sigma [rad] for yaw (~6°)

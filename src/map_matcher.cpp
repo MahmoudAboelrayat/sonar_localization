@@ -36,6 +36,7 @@ public:
         initialpose_topic_ = declare_parameter<std::string>("initialpose_topic",  "/initialpose");
         child_frame_       = declare_parameter<std::string>("child_frame",        "icp_map");
         period_            = declare_parameter<double>("period",            5.0);
+        min_keyframes_     = declare_parameter<int>   ("min_keyframes",     0);
         voxel_size_        = declare_parameter<float> ("voxel_size",        0.3f);
         fitness_threshold_ = declare_parameter<double>("fitness_threshold", 0.3);
         max_corr_dist_     = declare_parameter<double>("max_corr_dist",     2.0);
@@ -109,6 +110,7 @@ public:
                 std::lock_guard<std::mutex> lk(slam_mutex_);
                 slam_map_ = cloud;
                 has_slam_ = true;
+                ++slam_kf_count_;
             });
 
         // ── Publisher ─────────────────────────────────────────────────────────
@@ -169,6 +171,11 @@ private:
             if (!has_slam_ || slam_map_->size() < 20) {
                 RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
                     "Waiting for SLAM map on %s", slam_map_topic_.c_str());
+                return;
+            }
+            if (min_keyframes_ > 0 && slam_kf_count_ < min_keyframes_) {
+                RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
+                    "Waiting for keyframes: %d / %d", slam_kf_count_.load(), min_keyframes_);
                 return;
             }
             slam_snap = slam_map_;
@@ -272,6 +279,8 @@ private:
     std::mutex slam_mutex_;
     pcl::PointCloud<pcl::PointXYZ>::Ptr slam_map_;
     bool has_slam_{false};
+    std::atomic<int> slam_kf_count_{0};
+    int min_keyframes_{0};
 
     std::mutex      correction_mutex_;
     Eigen::Matrix4f last_correction_{Eigen::Matrix4f::Identity()};
