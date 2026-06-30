@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.14)
 project(sonar_localization)
 
 # --- 1. Compiler Settings ---
@@ -25,6 +25,19 @@ find_package(Eigen3 REQUIRED)
 find_package(GTSAM REQUIRED)
 find_package(small_gicp REQUIRED)
 
+# --- DUFOMap (dynamic/static submap filtering) ---
+set(DUFOMAP_ROOT "/home/thor/dufomap_private/cpp" CACHE PATH "Path to DUFOMap C++ sources")
+add_subdirectory(${DUFOMAP_ROOT} ${CMAKE_BINARY_DIR}/dufomap EXCLUDE_FROM_ALL)
+
+add_library(dufomap_submap_filter src/dufomap_submap_filter.cpp)
+target_include_directories(dufomap_submap_filter PUBLIC
+  include
+  ${DUFOMAP_ROOT}
+  ${PCL_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+)
+target_link_libraries(dufomap_submap_filter PUBLIC dm_lib ${PCL_LIBRARIES})
+
 # --- 3. Executable Targets ---
 
 # Node: loopclosure_vgicp
@@ -35,13 +48,30 @@ ament_target_dependencies(loopclosure_vgicp
   fast_gicp GTSAM
 )
 target_include_directories(loopclosure_vgicp PUBLIC 
+  include
   ${GTSAM_INCLUDE_DIR} 
   ${PCL_INCLUDE_DIRS} 
   ${EIGEN3_INCLUDE_DIRS}
 )
 target_link_libraries(loopclosure_vgicp 
+  dufomap_submap_filter
   ${PCL_LIBRARIES} 
   gtsam
+)
+
+# Node: dufomap_submap_validator
+add_executable(dufomap_submap_validator src/dufomap_submap_validator.cpp)
+ament_target_dependencies(dufomap_submap_validator
+  rclcpp sensor_msgs nav_msgs geometry_msgs pcl_conversions tf2_ros tf2_eigen
+)
+target_include_directories(dufomap_submap_validator PUBLIC
+  include
+  ${PCL_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+)
+target_link_libraries(dufomap_submap_validator
+  dufomap_submap_filter
+  ${PCL_LIBRARIES}
 )
 
 # Node: prior_map_localizer
@@ -208,6 +238,7 @@ install(TARGETS
   localization_prior
   localization_imu_pre
   loopclosure_vgicp
+  dufomap_submap_validator
   loopclosure_samll_vgicp
   prior_map_localizer
   prior_map_publisher
@@ -274,6 +305,10 @@ install(PROGRAMS ${PROJECT_NAME}/sonar_noise.py
 install(PROGRAMS ${PROJECT_NAME}/odom_tf.py
         DESTINATION lib/${PROJECT_NAME}
         RENAME odom_tf)
+
+install(PROGRAMS ${PROJECT_NAME}/odom_tf_broadcaster.py
+        DESTINATION lib/${PROJECT_NAME}
+        RENAME odom_tf_broadcaster.py)
 
 install(PROGRAMS ${PROJECT_NAME}/nucleus_imu_bridge.py
         DESTINATION lib/${PROJECT_NAME}

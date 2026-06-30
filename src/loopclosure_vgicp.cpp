@@ -40,6 +40,8 @@
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 
+#include "sonar_localization/dufomap_submap_filter.hpp"
+
 using gtsam::symbol_shorthand::X;
 
 struct Keyframe {
@@ -92,6 +94,15 @@ public:
         submap_size_     = this->declare_parameter<int>   ("keyframe.submap_size",  20);
         kf_dist_thresh_  = this->declare_parameter<double>("keyframe.dist_thresh",  0.5);
         kf_angle_thresh_ = this->declare_parameter<double>("keyframe.angle_thresh", 10.0);
+        apply_dufomap_to_submap_ = this->declare_parameter<bool>("keyframe.apply_dufomap_to_submap", false);
+
+        dufomap_cfg_.resolution = this->declare_parameter<double>("dufomap.resolution", map_res);
+        dufomap_cfg_.d_s = this->declare_parameter<double>("dufomap.d_s", 0.1);
+        dufomap_cfg_.d_p = static_cast<std::size_t>(this->declare_parameter<int>("dufomap.d_p", 2));
+        dufomap_cfg_.num_threads = static_cast<std::size_t>(this->declare_parameter<int>("dufomap.num_threads", 4));
+        dufomap_cfg_.hit_extension = this->declare_parameter<bool>("dufomap.hit_extension", true);
+        dufomap_cfg_.ray_passthrough_hits = this->declare_parameter<bool>("dufomap.ray_passthrough_hits", false);
+        dufomap_cfg_.use_cluster = this->declare_parameter<bool>("dufomap.use_cluster", false);
 
         lc_search_radius_ = this->declare_parameter<double>("loop_closure.search_radius", 10.0);
         lc_fitness_score_ = this->declare_parameter<double>("loop_closure.fitness_score", 0.3);
@@ -551,12 +562,32 @@ private:
     void updateSubmap()
     {
         local_map_->clear();
-        int start = std::max(0, static_cast<int>(keyframes_.size()) - submap_size_);
-        for (int i = start; i < static_cast<int>(keyframes_.size()); ++i) {
-            pcl::PointCloud<pcl::PointXYZ> transformed;
-            pcl::transformPointCloud(*keyframes_[i].cloud, transformed, keyframes_[i].pose);
-            *local_map_ += transformed;
+        const int start = std::max(0, static_cast<int>(keyframes_.size()) - submap_size_);
+        const int end = static_cast<int>(keyframes_.size()) - 1;
+
+        if (apply_dufomap_to_submap_ && end >= start) {
+            std::vector<dufomap_submap_filter::KeyframeView> views;
+            views.reserve(static_cast<std::size_t>(end - start + 1));
+            for (int i = start; i <= end; ++i) {
+                dufomap_submap_filter::KeyframeView view;
+                view.pose = keyframes_[static_cast<std::size_t>(i)].pose;
+                view.cloud = keyframes_[static_cast<std::size_t>(i)].cloud;
+                views.push_back(view);
+            }
+
+            const auto filtered = dufomap_submap_filter::buildStaticSubmap(
+                views, 0, static_cast<int>(views.size()) - 1, dufomap_cfg_);
+            *local_map_ = filtered.static_map;
+        } else {
+            for (int i = start; i <= end; ++i) {
+                pcl::PointCloud<pcl::PointXYZ> transformed;
+                pcl::transformPointCloud(*keyframes_[static_cast<std::size_t>(i)].cloud,
+                                         transformed,
+                                         keyframes_[static_cast<std::size_t>(i)].pose);
+                *local_map_ += transformed;
+            }
         }
+
         pcl::PointCloud<pcl::PointXYZ>::Ptr ds(new pcl::PointCloud<pcl::PointXYZ>);
         map_filter_.setInputCloud(local_map_);
         map_filter_.filter(*ds);
@@ -978,6 +1009,8 @@ private:
 
     int    submap_size_{20};
     double kf_dist_thresh_{0.5}, kf_angle_thresh_{10.0};
+    bool   apply_dufomap_to_submap_{false};
+    dufomap_submap_filter::Config dufomap_cfg_;
 
     double lc_search_radius_{10.0}, lc_fitness_score_{0.3};
     int    lc_history_gap_{10}, lc_submap_size_{7};

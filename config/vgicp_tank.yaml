@@ -61,6 +61,16 @@ odom_vgicp:
       submap_size:   30      
       dist_thresh:   0.25
       angle_thresh:  5.0    # degrees 
+      apply_dufomap_to_submap: false
+
+    dufomap:
+      resolution: 0.05
+      d_s: 0.1
+      d_p: 2
+      num_threads: 4
+      hit_extension: true
+      ray_passthrough_hits: false
+      use_cluster: false
 
 
     loop_closure:

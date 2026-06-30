@@ -1,0 +1,57 @@
+dufomap_submap_validator:
+  ros__parameters:
+    is_ned: false
+    use_sim_time: true
+    use_tf_extrinsic: false
+    use_tf_pose: true
+    tf_lookup_timeout: 0.2
+
+    topics:
+      pc_sub: "/usv/point_cloud"
+      odom_fallback: ""
+      keyframe_pub: "dufomap_validator/keyframe"
+      raw_submap_pub: "dufomap_validator/raw_submap"
+      static_submap_pub: "dufomap_validator/static_submap"
+      dynamic_cloud_pub: "dufomap_validator/dynamic_cloud"
+
+    frames:
+      odom_frame: "odom"
+      base_frame: "base_link"
+      sonar_frame: "usv/sonar_link"
+
+    tuning:
+      map_res: 0.2
+      voxelize_output: false
+
+    tf:
+      base2sonar_x: 0.38
+      base2sonar_y: 0.08
+      base2sonar_z: -0.525
+      base2sonar_roll: 180.0
+      base2sonar_pitch: -30.0
+      base2sonar_yaw: 0.0
+
+    keyframe:
+      submap_size: 30
+      dist_thresh: 0.25
+      angle_thresh: 8.0
+
+    radius_outlier_removal:
+      filter_radius_outliers: false
+      search_radius: 0.2
+      min_neighbors_in_radius: 30
+
+    outlier_removal:
+      filter_outliers: false
+      num_neighbors: 30
+      stddev_mul_thresh: 0.7
+
+    dufomap:
+      resolution: 0.2
+      d_s: 0.1
+      d_p: 2
+      num_threads: 4
+      hit_extension: true
+      ray_passthrough_hits: false
+      use_cluster: false
+      propagate: true
