@@ -9,6 +9,7 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
+#include <geometry_msgs/msg/pose_array.hpp>
 
 #include <tf2_eigen/tf2_eigen.hpp>
 #include <tf2_ros/buffer.h>
@@ -45,6 +46,7 @@ public:
         const std::string static_topic = declare_parameter<std::string>("topics.static_submap_pub", "dufomap_validator/static_submap");
         const std::string dynamic_topic = declare_parameter<std::string>("topics.dynamic_cloud_pub", "dufomap_validator/dynamic_cloud");
         const std::string keyframe_topic = declare_parameter<std::string>("topics.keyframe_pub", "dufomap_validator/keyframe");
+        const std::string keyframe_poses_topic = declare_parameter<std::string>("topics.keyframe_poses_pub", "dufomap_validator/keyframe_poses");
 
         odom_frame_ = declare_parameter<std::string>("frames.odom_frame", "odom");
         base_frame_ = declare_parameter<std::string>("frames.base_frame", "base_link");
@@ -103,6 +105,7 @@ public:
         static_submap_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(static_topic, 1);
         dynamic_cloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(dynamic_topic, 1);
         keyframe_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(keyframe_topic, 1);
+        keyframe_poses_pub_ = create_publisher<geometry_msgs::msg::PoseArray>(keyframe_poses_topic, 1);
 
         pc_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
             pc_topic, 10,
@@ -349,10 +352,8 @@ private:
             kf.cloud = filtered;
             keyframes_.push_back(kf);
 
-            const int max_kf = submap_size_;
-            if (static_cast<int>(keyframes_.size()) > max_kf) {
-                keyframes_.erase(keyframes_.begin());
-            }
+            // All keyframes are kept; the submap is always rebuilt/rolled
+            // from the most recent submap_size_ keyframes (see publishSubmaps).
 
             publishKeyframe(keyframes_.back(), msg->header.stamp);
             publishSubmaps(msg->header.stamp);
@@ -366,31 +367,38 @@ private:
         publishCloud(keyframe_pub_, cloud_world, stamp);
     }
 
-    void updateDufomapWindow(
+    void publishKeyframePoses(
         const std::vector<dufomap_submap_filter::KeyframeView>& views,
-        int window_start)
+        const builtin_interfaces::msg::Time& stamp)
     {
-        const std::size_t kf_count = keyframes_.size();
-        const bool rebuild =
-            last_integrated_start_ != window_start ||
-            kf_count < last_integrated_count_;
-
-        if (rebuild) {
-            dufomap_filter_->reset();
-            for (const auto& view : views) {
-                dufomap_filter_->integrateKeyframe(view);
-            }
-        } else if (kf_count > last_integrated_count_ && !views.empty()) {
-            dufomap_filter_->integrateKeyframe(views.back());
+        geometry_msgs::msg::PoseArray pose_array;
+        pose_array.header.stamp = stamp;
+        pose_array.header.frame_id = odom_frame_;
+        pose_array.poses.reserve(views.size());
+        for (const auto& view : views) {
+            const Eigen::Affine3d affine(view.pose.cast<double>());
+            pose_array.poses.push_back(tf2::toMsg(affine));
         }
+        keyframe_poses_pub_->publish(pose_array);
+    }
 
-        last_integrated_start_ = window_start;
-        last_integrated_count_ = kf_count;
+    void updateDufomapWindow(
+        const std::vector<dufomap_submap_filter::KeyframeView>& views)
+    {
+        // Always rebuild the map from scratch for the current window. DUFOMap
+        // cannot un-integrate keyframes, so the only way to roll the window is
+        // to clear and re-integrate the most recent submap_size_ keyframes.
+        dufomap_filter_->reset();
+        for (const auto& view : views) {
+            dufomap_filter_->integrateKeyframe(view);
+        }
     }
 
     void publishSubmaps(const builtin_interfaces::msg::Time& stamp)
     {
-        if (keyframes_.empty()) {
+        // Keep accumulating keyframes until we have a full window; only then
+        // do we build and publish a submap.
+        if (static_cast<int>(keyframes_.size()) < submap_size_) {
             return;
         }
 
@@ -406,7 +414,8 @@ private:
             views.push_back(view);
         }
 
-        updateDufomapWindow(views, start);
+        updateDufomapWindow(views);
+        publishKeyframePoses(views, stamp);
 
         pcl::PointCloud<pcl::PointXYZ> raw_map =
             dufomap_submap_filter::buildRawSubmap(views, 0, static_cast<int>(views.size()) - 1);
@@ -480,10 +489,9 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr static_submap_pub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr dynamic_cloud_pub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr keyframe_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr keyframe_poses_pub_;
 
     std::unique_ptr<dufomap_submap_filter::SubmapFilter> dufomap_filter_;
-    int last_integrated_start_{-1};
-    std::size_t last_integrated_count_{0};
 
     std::mutex kf_mutex_;
     std::mutex odom_mutex_;

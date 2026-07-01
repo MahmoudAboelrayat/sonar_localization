@@ -2,7 +2,7 @@ dufomap_submap_validator:
   ros__parameters:
     is_ned: false
     use_sim_time: true
-    use_tf_extrinsic: false
+    use_tf_extrinsic: true
     use_tf_pose: true
     tf_lookup_timeout: 0.2
 
@@ -27,7 +27,7 @@ dufomap_submap_validator:
       base2sonar_x: 0.38
       base2sonar_y: 0.08
       base2sonar_z: -0.525
-      base2sonar_roll: 180.0
+      base2sonar_roll: 0.0  # Having some transform issues with 180.0
       base2sonar_pitch: -30.0
       base2sonar_yaw: 0.0
 
@@ -49,9 +49,39 @@ dufomap_submap_validator:
     dufomap:
       resolution: 0.2
       d_s: 0.1
-      d_p: 2
+      d_p: 0
       num_threads: 4
       hit_extension: true
       ray_passthrough_hits: false
       use_cluster: false
       propagate: true
+
+# Angular range median filter (dufomap_ros angular_range_median_node).
+#
+# enabled:        toggle the median filter on/off. The launch file reads this
+#                 to decide whether to start the node, and to wire the
+#                 validator's input topic:
+#                   enabled: true  -> validator subscribes to output_topic
+#                   enabled: false -> validator subscribes to input_topic
+# input_topic:    raw sonar cloud (median filter input / validator input when off)
+# output_topic:   median-filtered cloud (median filter output / validator input when on)
+# flip_horizontal/flip_vertical: left-right (Y) and up-down (Z) mirrors before filtering
+angular_range_median_filter:
+  ros__parameters:
+    enabled: true
+    input_topic: "/usv/point_cloud"
+    output_topic: "/usv/point_cloud_median"
+    flip_horizontal: true
+    flip_vertical: false
+    fov_h_deg: 90.0
+    fov_v_deg: 40.0
+    image_width: 256
+    image_height: 64
+    bin_size_deg: 0.0
+    yaw_window_deg: 5.0
+    pitch_window_deg: 5.0
+    min_neighbors: 3
+    remove_speckle: 1
+    yaw_offset_deg: 0.0
+    pitch_offset_deg: 0.0
+    log_stats: false

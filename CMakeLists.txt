@@ -74,6 +74,18 @@ target_link_libraries(dufomap_submap_validator
   ${PCL_LIBRARIES}
 )
 
+# Synthetic dufomap integration/segmentation smoke test (no ROS)
+add_executable(dufomap_submap_filter_test test/dufomap_submap_filter_test.cpp)
+target_include_directories(dufomap_submap_filter_test PUBLIC
+  include
+  ${PCL_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+)
+target_link_libraries(dufomap_submap_filter_test
+  dufomap_submap_filter
+  ${PCL_LIBRARIES}
+)
+
 # Node: prior_map_localizer
 add_executable(prior_map_localizer src/prior_map_localizer.cpp)
 ament_target_dependencies(prior_map_localizer
